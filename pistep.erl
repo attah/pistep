@@ -11,6 +11,14 @@
 
 -define(RES,40). %steps per mm
 
+
+gpio_init(What,_Dir) ->
+	What.
+
+gpio_write(What,Value) ->
+	io:format("Wrote ~p to ~p~n",[Value,What] ).
+
+
 start() ->
 
 
@@ -83,8 +91,8 @@ handle_g03(Cmd,Worker) ->
 
 
 workerInit(Xlist,Ylist) ->
-	X = [ gpio:init(P,out) || P <- Xlist ],
-	Y = [ gpio:init(P,out) || P <- Ylist],
+	X = [ gpio_init(P,out) || P <- Xlist ],
+	Y = [ gpio_init(P,out) || P <- Ylist],
 
 	workerLoop(#handles{x=X,y=Y}, 5).
 
@@ -136,10 +144,10 @@ handleHoldLoop(L,4,forward) ->
 	handleHoldLoop(L,4,backward);
 handleHoldLoop(List,N,Dir) ->
 	[A,B,C,D] = List,
-	gpio:write(D,0),
-	gpio:write(C,0),
-	gpio:write(A,1),
-	gpio:write(B,1),
+	gpio_write(D,0),
+	gpio_write(C,0),
+	gpio_write(A,1),
+	gpio_write(B,1),
 	io:format("~p~p",[A,B]),
 	receive
 		after 5 ->
@@ -179,45 +187,45 @@ handle_linear(Handles,X,Y,F,Mode) ->
 	% assert tool status
 	Wait = feedToWait(F,Mode),
 
-	{X,Y} = case X of
+	{Xhandles,Yhandles} = case Xa of
 		%Y ->
 		%	io:format("X == Y",[]);
 		_ when Xa>=Ya ->
-			io:format("X > Y",[]),
+			io:format("X > Y ~n",[]),
 			{A1,A2} = line_to_steps(X,Handles#handles.x,Y,Handles#handles.y,Wait),
 			{A1,A2};
 		_ when Ya>Xa ->
-			io:format("Y > X",[]),
+			io:format("Y > X ~n",[]),
 			{A1,A2} = line_to_steps(Y,Handles#handles.y,X,Handles#handles.x,Wait),
 			{A2,A1} % le flip 
 	end,
-	#handles{x=X,y=Y}.
+	#handles{x=Xhandles,y=Yhandles}.
 
 line_to_steps(A1,A1_handles,A2,A2_handles,W) ->
 	% 1st wait here possibly.
-	line_to_steps(myabs(A1),A1_handles,dir(A1),myabs(A2),A2_handles,dir(A2),myabs(A2)/myabs(A1),W,0).
+	line_to_steps(myabs(A1),A1_handles,dir(A1),myabs(A2),A2_handles,dir(A2),myabs(A2)/myabs(A1),W,0,0).
 
-line_to_steps(0,_,_,1,_,_,_Q,_F,_S) ->
+line_to_steps(0,_,_,1,_,_,_Q,_F,_S1,_S2) ->
 	error("missed A2-step!");
-line_to_steps(0,A1_handles,_,0,A2_handles,_,_Q,_W,_S) ->
+line_to_steps(0,A1_handles,_,0,A2_handles,_,_Q,_W,_S1,_S2) ->
 	{A1_handles,A2_handles};
-line_to_steps(A1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S) ->
-	case S*Q>=1 of
+line_to_steps(A1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S1,S2) ->
+	case ((S1+1)*Q)>=(1+S2) of
 		true ->
 			case A2 > 0 of
 				true ->
-					io:format("Step A2",[]);
+					io:format("Step A2~n",[]);
 				false ->
-					io:format("WARNING we have run out of A2 steps, but more are expected",[]),
+					io:format("WARNING we have run out of A2 steps, but more are expected.. A1=~p A2=~p S=~p Q=~p~n",[A1,A2,S1,Q]),
 					exit("wtf")
 			end,
-			io:format("Step A1 after A2",[]),
+			io:format("Step A1 after A2~n",[]),
 			% wait sqrt(2)*W
-			line_to_steps(A1-1,A1_handles,A1_dir,A2-1,A2_handles,A2_dir,Q,W,S+1);
+			line_to_steps(A1-1,A1_handles,A1_dir,A2-1,A2_handles,A2_dir,Q,W,S1+1,S2+1);
 		false ->
-			io:format("Step A1 only",[]),
+			io:format("Step A1 only~n",[]),
 			% wait W
-			line_to_steps(A1-1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S+1)
+			line_to_steps(A1-1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S1+1,S2)
 	end.
 
 
