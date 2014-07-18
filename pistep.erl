@@ -205,12 +205,14 @@ line_to_steps(A1,A1_handles,A2,A2_handles,W) ->
 	% 1st wait here possibly.
 	line_to_steps(myabs(A1),A1_handles,dir(A1),myabs(A2),A2_handles,dir(A2),myabs(A2)/myabs(A1),W,0,0).
 
-line_to_steps(0,_,_,1,_,_,_Q,_F,_S1,_S2) ->
-	error("missed A2-step!");
 line_to_steps(0,A1_handles,_,0,A2_handles,_,_Q,_W,_S1,_S2) ->
 	{A1_handles,A2_handles};
+line_to_steps(0,_,_,A2,_,_,_Q,_F,_S1,_S2) ->
+	io:format("missed ~p A2-steps!~n",[A2]),
+	error("missed A2-steps!");
+
 line_to_steps(A1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S1,S2) ->
-	case ((S1+1)*Q)>=(1+S2) of
+	case ((S1+1)*Q)>(0.5+S2) of
 		true ->
 			case A2 > 0 of
 				true ->
@@ -253,5 +255,11 @@ feedToWait(F,Mode) ->
 			round(5/F*5)
 	end.
 
-
+dirToRadSign(Dir) ->
+	case Dir of
+		cw ->
+			-1;
+		ccw ->
+			1
+	end.
 
