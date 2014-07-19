@@ -2,6 +2,7 @@
 -export([start/0]).
 -export([init/0]).
 -export([workerInit/2]).
+-export ([svg_init/0]).
 -record(g00,{x,y}).
 -record(g01,{x,y,f}).
 -record(g02,{x,y,i,j,f}).
@@ -11,6 +12,8 @@
 
 -define(RES,40). %steps per mm
 
+-define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"400\" height=\"400\"> ").
+-define(SvgEnd,"</svg>").
 
 gpio_init(What,_Dir) ->
 	What.
@@ -18,10 +21,56 @@ gpio_init(What,_Dir) ->
 gpio_write(What,Value) ->
 	io:format("Wrote ~p to ~p~n",[Value,What] ).
 
+%handlesToAxis(Handles) ->
+%	case lists:member(14,Handles) of
+%		true
+
+svg_init() ->
+	register(svg, self()),
+	case file:open("debug.svg", [write]) of
+		{ok, Fd} ->
+			file:write(Fd, ?SvgHead),
+			svg_loop(Fd);
+		{error, Reason} ->
+			Reason
+	end.
+
+svg_loop(Fd) ->
+	receive 
+		{segment, M, Xi,Yi, Xsign, Ysign, A1} ->
+			file:write(Fd, io_lib:format("<path d=\"M~p, ~p ", [Xi,Yi])),
+			inner_svg_loop(Fd, Xsign, Ysign, A1),
+			file:write(Fd, io_lib:format("\" style=\"fill-opacity:1; stroke:~s; stroke-width:0;\"/>",[colorFromMode(M)])),
+			svg_loop(Fd);
+		{endprogram} ->
+			file:write(Fd, ?SvgEnd)
+	end.
+
+
+inner_svg_loop(Fd, Xsign, Ysign, PrimaryAxis) ->
+	receive 
+		{step, A1, A2} ->
+			{X,Y} = case PrimaryAxis of
+				x -> {Xsign*A1,Ysign*A2};
+				y -> {Xsign*A2,Ysign*A1}
+			end,
+			file:write(Fd, io_lib:format(" l ~p ~p ",[X,Y])),
+			inner_svg_loop(Fd, Xsign, Ysign, PrimaryAxis);
+		{endsegment} ->
+			ok
+	end.
+
+colorFromMode(Mode) ->
+	case Mode of
+		move ->
+			"#000066";
+		tool ->
+			"#111111"
+	end.
 
 start() ->
 
-
+	spawn_link(?MODULE, svg_init, []),
 	spawn_link(?MODULE, init, []).
 
 	%loop(0, List).
@@ -52,8 +101,11 @@ gsrv(Worker) ->
 		G03=#g03{} ->
 			io:format("got g03 ~p~n", [G03]),
 			handle_g03(G03,Worker);
+		{done,_Pid} ->
+			io:format("Segment done~n",[]);
 		G -> 
 			io:format("got something else ~p~n", [G]),
+			svg ! {endprogram},
 			exit("herp")
 	end,
 	gsrv(Worker).
@@ -192,13 +244,16 @@ handle_linear(Handles,X,Y,F,Mode) ->
 		%	io:format("X == Y",[]);
 		_ when Xa>=Ya ->
 			io:format("X > Y ~n",[]),
+			svg ! {segment, Mode, 0, 0, sign(X), sign(Y), x},
 			{A1,A2} = line_to_steps(X,Handles#handles.x,Y,Handles#handles.y,Wait),
 			{A1,A2};
 		_ when Ya>Xa ->
 			io:format("Y > X ~n",[]),
+			svg ! {segment, Mode, 0, 0, sign(X), sign(Y), y},
 			{A1,A2} = line_to_steps(Y,Handles#handles.y,X,Handles#handles.x,Wait),
 			{A2,A1} % le flip 
 	end,
+	svg ! {endsegment},
 	#handles{x=Xhandles,y=Yhandles}.
 
 line_to_steps(A1,A1_handles,A2,A2_handles,W) ->
@@ -212,6 +267,8 @@ line_to_steps(0,_,_,A2,_,_,_Q,_F,_S1,_S2) ->
 	error("missed A2-steps!");
 
 line_to_steps(A1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S1,S2) ->
+		  %S1+1 = what we are stepping to. 
+		  % 0.5 to step half way in between, also eliminates need for >=
 	case ((S1+1)*Q)>(0.5+S2) of
 		true ->
 			case A2 > 0 of
@@ -223,10 +280,12 @@ line_to_steps(A1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S1,S2) ->
 			end,
 			io:format("Step A1 after A2~n",[]),
 			% wait sqrt(2)*W
+			svg ! {step, 1, 1},
 			line_to_steps(A1-1,A1_handles,A1_dir,A2-1,A2_handles,A2_dir,Q,W,S1+1,S2+1);
 		false ->
 			io:format("Step A1 only~n",[]),
 			% wait W
+			svg ! {step, 1, 0},
 			line_to_steps(A1-1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S1+1,S2)
 	end.
 
@@ -238,6 +297,15 @@ dir(Var) ->
 		false ->
 			forward
 	end.
+
+sign(Var) ->
+	case Var < 0 of
+		true ->
+			-1;
+		false ->
+			1
+	end.
+
 myabs(Var) ->
 	case Var < 0 of
 		true ->
