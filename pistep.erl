@@ -12,7 +12,7 @@
 
 -define(RES,40). %steps per mm
 
--define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"400\" height=\"400\"> ").
+-define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"1400\" height=\"900\"> ").
 -define(SvgEnd,"</svg>").
 
 gpio_init(What,_Dir) ->
@@ -37,7 +37,7 @@ svg_init() ->
 
 svg_loop(Fd) ->
 	receive 
-		{segment, M, Xi,Yi, Xsign, Ysign, A1} ->
+		{segment, M, {Xi,Yi}, Xsign, Ysign, A1} ->
 			file:write(Fd, io_lib:format("<path d=\"M~p, ~p ", [Xi,Yi])),
 			inner_svg_loop(Fd, Xsign, Ysign, A1),
 			file:write(Fd, io_lib:format("\" style=\"fill-opacity:1; stroke:~s; stroke-width:0;\"/>",[colorFromMode(M)])),
@@ -106,7 +106,10 @@ gsrv(Worker) ->
 		G -> 
 			io:format("got something else ~p~n", [G]),
 			svg ! {endprogram},
-			exit("herp")
+			receive
+				after 100 ->
+					exit("herp")
+			end
 	end,
 	gsrv(Worker).
 
@@ -146,9 +149,9 @@ workerInit(Xlist,Ylist) ->
 	X = [ gpio_init(P,out) || P <- Xlist ],
 	Y = [ gpio_init(P,out) || P <- Ylist],
 
-	workerLoop(#handles{x=X,y=Y}, 5).
+	workerLoop(#handles{x=X,y=Y}, 5, {0,0}).
 
-workerLoop(Handles, Feed) ->
+workerLoop(Handles, Feed, Position) ->
 	io:format("worker ready~n"),
 	gsrv ! {done,self()},
 	receive
@@ -156,19 +159,21 @@ workerLoop(Handles, Feed) ->
 			io:format("linear, ~p~n",[Data] ),
 			%XXX use saved feed if undef!
 			NewF = whichF(Feed,F,Mode),
-			State = handle_linear(Handles,X,Y,NewF,Mode),
-			workerLoop(State, NewF);
+			State = handle_linear(Handles,X,Y,NewF,Mode,Position),
+			{Xi,Yi} = Position,
+			workerLoop(State, NewF,{Xi+X,Yi+Y});
 		Data = {circular,X,Y,I,J,F,Dir} ->
 			io:format("circle, ~p, NOP~n",[Data] ),
-			workerLoop(Handles, Feed);
+			NewPosition = Position,
+			workerLoop(Handles, Feed, NewPosition);
 		{hold} ->
 			io:format("hold, ~n",[] ),
 			State = handleHold(Handles),
-			workerLoop(State, Feed);
+			workerLoop(State, Feed, Position);
 		{release} ->
 			io:format("release~n"),
 			release(Handles),
-			workerLoop(Handles, Feed)
+			workerLoop(Handles, Feed, Position)
 	end.
 
 whichF(F_old,F_new,Mode)->
@@ -230,7 +235,7 @@ waitExecuted(Pid, Time) ->
 			error("fail timeout")
 	end.
 
-handle_linear(Handles,X,Y,F,Mode) ->
+handle_linear(Handles,X,Y,F,Mode,Pos) ->
 	io:format("handle linear",[]),
 		
 	Xa = myabs(X),
@@ -244,12 +249,12 @@ handle_linear(Handles,X,Y,F,Mode) ->
 		%	io:format("X == Y",[]);
 		_ when Xa>=Ya ->
 			io:format("X > Y ~n",[]),
-			svg ! {segment, Mode, 0, 0, sign(X), sign(Y), x},
+			svg ! {segment, Mode, Pos, sign(X), sign(Y), x},
 			{A1,A2} = line_to_steps(X,Handles#handles.x,Y,Handles#handles.y,Wait),
 			{A1,A2};
 		_ when Ya>Xa ->
 			io:format("Y > X ~n",[]),
-			svg ! {segment, Mode, 0, 0, sign(X), sign(Y), y},
+			svg ! {segment, Mode, Pos, sign(X), sign(Y), y},
 			{A1,A2} = line_to_steps(Y,Handles#handles.y,X,Handles#handles.x,Wait),
 			{A2,A1} % le flip 
 	end,
