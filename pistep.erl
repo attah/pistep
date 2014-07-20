@@ -12,8 +12,8 @@
 
 -define(RES,40). %steps per mm
 
--define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"1400\" height=\"900\"> ").
--define(SvgEnd,"</svg>").
+-define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"1400\" height=\"900\"> <g transform=\"translate(0,900)\"><g transform=\"scale(1,-1)\">").
+-define(SvgEnd,"</g></g></svg>").
 
 gpio_init(What,_Dir) ->
 	What.
@@ -40,7 +40,7 @@ svg_loop(Fd) ->
 		{segment, M, {Xi,Yi}, Xsign, Ysign, A1} ->
 			file:write(Fd, io_lib:format("<path d=\"M~p, ~p ", [Xi,Yi])),
 			inner_svg_loop(Fd, Xsign, Ysign, A1),
-			file:write(Fd, io_lib:format("\" style=\"fill-opacity:1; stroke:~s; stroke-width:0;\"/>",[colorFromMode(M)])),
+			file:write(Fd, io_lib:format("\" style=\"fill:#ffffff; fill-opacity:0; stroke:~s; stroke-width:1;\"/>",[colorFromMode(M)])),
 			svg_loop(Fd);
 		{endprogram} ->
 			file:write(Fd, ?SvgEnd)
@@ -129,6 +129,7 @@ handle_g01(Cmd,Worker) ->
 
 handle_g02(Cmd,Worker) ->
 	Worker ! {circular,
+			  Cmd#g02.x,
 			  Cmd#g02.y,
 			  Cmd#g02.i,
 			  Cmd#g02.j,
@@ -159,13 +160,14 @@ workerLoop(Handles, Feed, Position) ->
 			io:format("linear, ~p~n",[Data] ),
 			%XXX use saved feed if undef!
 			NewF = whichF(Feed,F,Mode),
-			State = handle_linear(Handles,X,Y,NewF,Mode,Position),
-			{Xi,Yi} = Position,
-			workerLoop(State, NewF,{Xi+X,Yi+Y});
+			{{Xs,Ys},NewP} = moveFromMode(Position,{X,Y},rel),
+			State = handle_linear(Handles,Xs,Ys,NewF,Mode,Position),
+			workerLoop(State, NewF,NewP);
 		Data = {circular,X,Y,I,J,F,Dir} ->
-			io:format("circle, ~p, NOP~n",[Data] ),
-			NewPosition = Position,
-			workerLoop(Handles, Feed, NewPosition);
+			io:format("circle, ~p~n",[Data] ),
+			{{Xs,Ys},NewP} = moveFromMode(Position,{X,Y},rel),
+			handle_circular(Handles,Xs,Ys,I,J,F,Dir,Position),
+			workerLoop(Handles, Feed, NewP);
 		{hold} ->
 			io:format("hold, ~n",[] ),
 			State = handleHold(Handles),
@@ -174,6 +176,14 @@ workerLoop(Handles, Feed, Position) ->
 			io:format("release~n"),
 			release(Handles),
 			workerLoop(Handles, Feed, Position)
+	end.
+
+moveFromMode({Xi,Yi},{Xc,Yc},Mode) ->
+	case Mode of
+		rel ->
+			{{Xc,Yc},{Xi+Xc,Yi+Yc}};
+		abs -> 
+			{{Xc-Xi,Yc-Yi},{Xc,Yc}}
 	end.
 
 whichF(F_old,F_new,Mode)->
@@ -293,7 +303,102 @@ line_to_steps(A1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S1,S2) ->
 			svg ! {step, 1, 0},
 			line_to_steps(A1-1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S1+1,S2)
 	end.
+handle_circular(Handles,Xt,Yt,I,J,F,Dir,AbsPos) ->
+	svg ! {segment, tool, AbsPos, 1, 1, x}, % Transperent input
+	Sign = dirToRadSign(Dir),
+	Steps = myabs(pyth(I,J)*sumAngles(math:atan2(-J,-I), math:atan2(Yt-J,Xt-I), Dir)),
+	io:format("Steps: ~p Angles:~p~n",[Steps,sumAngles(math:atan2(-J,-I), math:atan2(Yt-J,Xt-I), Dir)]),
+	arc_to_steps(Handles,Steps,math:atan2(-J,-I),{0,0},{Xt,Yt},{I,J},pyth(I,J),F,Sign),
+	svg ! {endsegment}.
 
+
+arc_to_steps(Handles,0,_Angle,_Pos,_TargetPos,_CenterPos,_R,_F,_Sign) ->
+	Handles;
+arc_to_steps(Handles,Steps,_Angle,_Pos,_TargetPos,_CenterPos,_R,_F,_Sign) when Steps < 1 ->
+	io:format("gotcha!",[]),
+	Handles;
+
+arc_to_steps(Handles,Steps,Angle,Pos,TargetPos,CenterPos,R,F,Sign) ->
+	Anext = Angle+Sign*(1/R),
+	{Xnow,Ynow} = Pos,
+	{Xcenter,Ycenter} = CenterPos,
+	Xnext = math:cos(Anext)*R,
+	Ynext = math:sin(Anext)*R,
+	Xstep = round((Xcenter + Xnext)-Xnow),
+	Ystep = round((Ycenter + Ynext)-Ynow), 
+	io:format("Steps: ~p, Angle:~p, Pos:~p, TargetPos:~p, CenterPos~p, R:~p, Sign:~p, Anext:~p, Xnext:~p, Ynext:~p ~n",
+		[Steps,Angle,Pos,TargetPos,CenterPos,R,Sign,Anext,Xnext,Ynext]),
+	case stepWhat(myabs(Xstep),myabs(Ystep)) of
+		both ->
+			io:format("Step both", []),
+			svg ! {step, Xstep, Ystep};
+		x ->
+			io:format("Step x", []),
+			svg ! {step, Xstep, Ystep};
+		y ->
+			io:format("Step y", []),
+			svg ! {step, Xstep, Ystep};
+		neither ->
+			io:format("Step neither", [])
+			%error("nostep circle")
+	end,
+	arc_to_steps(Handles,Steps-1,Anext,{Xnow+Xstep,Ynow+Ystep},TargetPos,CenterPos,R,F,Sign).
+
+
+stepWhat(1,1) ->
+	both;
+stepWhat(1,0) ->
+	x;
+stepWhat(0,1) ->
+	y;
+stepWhat(0,0) ->
+	neither.
+
+
+sumAngles(A1,A2,Dir) ->
+	io:format("Sumangles A1:~p, A2:~p, Dir:~p~n",[A1,A2,Dir]),
+	case Dir of
+		cw ->
+			case diffsign(A1,A2) of
+				true ->
+					case A1 > A2 of
+						true ->
+							A1+myabs(A2);
+						false ->
+							math:pi()-myabs(A1)+math:pi()-A2
+						end;
+				false ->
+					case myabs(A1) >= myabs(A2) of
+						true ->
+							2*math:pi()-(A1-A2);
+						false -> 
+							A1-A2
+					end
+			end;
+		ccw ->
+			case diffsign(A1,A2) of
+				true ->
+					case A1 > A2 of
+						true ->
+							math:pi()-A1+math:pi()-myabs(A2);
+						false ->
+							myabs(A1)+A2
+					end;
+				false ->
+					case myabs(A2) >= myabs(A1) of
+						true ->
+							2*math:pi()-(A2-A1);
+						false -> 
+							A2-A1
+					end
+			end
+	end.
+
+diffsign(A1,A2) ->
+	not ((A1 >=0) and (A2 >= 0)) or ((A1 <0) and (A2 < 0)).
+ 
+pyth(X,Y) ->
+	math:sqrt(math:pow(myabs(X),2)+math:pow(myabs(Y),2)).
 
 dir(Var) ->
 	case Var < 0 of
