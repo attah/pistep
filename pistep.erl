@@ -15,11 +15,23 @@
 -define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"1400\" height=\"900\"> <g transform=\"translate(0,900)\"><g transform=\"scale(1,-1)\">").
 -define(SvgEnd,"</g></g></svg>").
 
-gpio_init(What,_Dir) ->
+-ifdef(debug).
+gpio_init(What,Dir) ->
 	What.
+-else.
+gpio_init(What,Dir) ->
 
+	gpio:init(What,Dir).
+-endif.
+
+
+-ifdef(debug).
 gpio_write(What,Value) ->
 	io:format("Wrote ~p to ~p~n",[Value,What] ).
+-else.
+gpio_write(What,Value) ->
+	gpio:write(What,Value).
+-endif.
 
 %handlesToAxis(Handles) ->
 %	case lists:member(14,Handles) of
@@ -70,7 +82,7 @@ colorFromMode(Mode) ->
 
 start() ->
 
-	spawn_link(?MODULE, svg_init, []),
+	%spawn_link(?MODULE, svg_init, []),
 	spawn_link(?MODULE, init, []).
 
 	%loop(0, List).
@@ -155,6 +167,7 @@ workerInit(Xlist,Ylist) ->
 workerLoop(Handles, Feed, Position) ->
 	io:format("worker ready~n"),
 	gsrv ! {done,self()},
+	release(Handles),
 	receive
 		Data = {linear,X,Y,F,Mode} ->
 			io:format("linear, ~p~n",[Data] ),
@@ -194,11 +207,14 @@ whichF(F_old,F_new,Mode)->
 			F_old
 	end.
 
+release({handles,X,Y}) ->
+	release(X),
+	release(Y);
 release([A,B,C,D]) ->
-	gpio:write(A,0),
-	gpio:write(B,0),
-	gpio:write(C,0),
-	gpio:write(D,0).
+	gpio_write(A,0),
+	gpio_write(B,0),
+	gpio_write(C,0),
+	gpio_write(D,0).
 
 handleHold(L) ->
 	X = handleHoldLoop(L#handles.x,8,forward),
@@ -296,12 +312,14 @@ line_to_steps(A1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S1,S2) ->
 			io:format("Step A1 after A2~n",[]),
 			% wait sqrt(2)*W
 			svg ! {step, 1, 1},
-			line_to_steps(A1-1,A1_handles,A1_dir,A2-1,A2_handles,A2_dir,Q,W,S1+1,S2+1);
+			{handles,A1state,A2state} = stepAccordingly({handles,A1_handles,A2_handles},1,A1_dir,1,A2_dir,W),
+			line_to_steps(A1-1,A1state,A1_dir,A2-1,A2state,A2_dir,Q,W,S1+1,S2+1);
 		false ->
 			io:format("Step A1 only~n",[]),
 			% wait W
 			svg ! {step, 1, 0},
-			line_to_steps(A1-1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S1+1,S2)
+			{handles,A1state,A2state} = stepAccordingly({handles,A1_handles,A2_handles},1,A1_dir,0,A2_dir,W),
+			line_to_steps(A1-1,A1state,A1_dir,A2,A2state,A2_dir,Q,W,S1+1,S2)
 	end.
 handle_circular(Handles,Xt,Yt,I,J,F,Dir,AbsPos) ->
 	svg ! {segment, tool, AbsPos, 1, 1, x}, % Transperent input
@@ -320,39 +338,71 @@ arc_to_steps(Handles,Steps,_Angle,_Pos,_TargetPos,_CenterPos,_R,_F,_Sign) when S
 
 arc_to_steps(Handles,Steps,Angle,Pos,TargetPos,CenterPos,R,F,Sign) ->
 	Anext = Angle+Sign*(1/R),
+
 	{Xnow,Ynow} = Pos,
 	{Xcenter,Ycenter} = CenterPos,
+
 	Xnext = math:cos(Anext)*R,
 	Ynext = math:sin(Anext)*R,
 	Xstep = round((Xcenter + Xnext)-Xnow),
 	Ystep = round((Ycenter + Ynext)-Ynow), 
+
+	% assert ones
+
+	%case Xstep != Ystep of
+
+	%Anextnext = Anext+Sign*(1/R)
+
 	io:format("Steps: ~p, Angle:~p, Pos:~p, TargetPos:~p, CenterPos~p, R:~p, Sign:~p, Anext:~p, Xnext:~p, Ynext:~p ~n",
 		[Steps,Angle,Pos,TargetPos,CenterPos,R,Sign,Anext,Xnext,Ynext]),
-	case stepWhat(myabs(Xstep),myabs(Ystep)) of
-		both ->
-			io:format("Step both", []),
-			svg ! {step, Xstep, Ystep};
-		x ->
-			io:format("Step x", []),
-			svg ! {step, Xstep, Ystep};
-		y ->
-			io:format("Step y", []),
-			svg ! {step, Xstep, Ystep};
-		neither ->
-			io:format("Step neither", [])
-			%error("nostep circle")
+
+	svg ! {step, Xstep, Ystep},
+	NewHandles = stepAccordingly(Handles,Xstep,Ystep,feedToWait(F,tool)),
+
+	arc_to_steps(NewHandles,Steps-1,Anext,{Xnow+Xstep,Ynow+Ystep},TargetPos,CenterPos,R,F,Sign).
+
+
+stepAccordingly(Handles,A1,A2,W) ->
+	stepAccordingly(Handles,myabs(A1),dir(A1),myabs(A2),dir(A2),W).
+
+stepAccordingly({handles,A1handles,A2handles},A1,A1dir,A2,A2dir,W) ->
+	A1state = case A1 of
+		0 ->
+			A1handles;
+		1 ->
+			[H11,H12,H13,H14] = shiftAccordingly(A1handles, A1dir),
+			gpio:write(H14,0),
+			gpio:write(H13,0),
+			gpio:write(H11,1),
+			gpio:write(H12,1),
+			[H11,H12,H13,H14]
 	end,
-	arc_to_steps(Handles,Steps-1,Anext,{Xnow+Xstep,Ynow+Ystep},TargetPos,CenterPos,R,F,Sign).
+	A2state = case A2 of
+		0 ->
+			A2handles;
+		1 ->
+			[H21,H22,H23,H24] = shiftAccordingly(A2handles,A2dir),
+			gpio:write(H24,0),
+			gpio:write(H23,0),
+			gpio:write(H21,1),
+			gpio:write(H22,1),
+			[H21,H22,H23,H24] 
+	end,
+	Wait = case A1+A2 of
+		2 ->
+			round(1.4*W);
+		1 ->
+			W;
+		0->
+			0
+	end,
+	receive
+		after Wait ->
+			ok
+	end,
+	{handles,A1state,A2state}.
 
 
-stepWhat(1,1) ->
-	both;
-stepWhat(1,0) ->
-	x;
-stepWhat(0,1) ->
-	y;
-stepWhat(0,0) ->
-	neither.
 
 
 sumAngles(A1,A2,Dir) ->
