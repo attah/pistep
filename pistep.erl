@@ -2,11 +2,49 @@
 -export([start/0]).
 -export([init/0]).
 -export([workerInit/2]).
--export ([svg_init/0]).
+-export([svg_init/0]).
+-export([readFile/1]).
 -record(g00,{x,y}).
 -record(g01,{x,y,f}).
 -record(g02,{x,y,i,j,f}).
 -record(g03,{x,y,i,j,f}).
+
+setf(R=#g00{},x,X) ->
+	R#g00{x=X};
+setf(R=#g00{},y,Y) ->
+	R#g00{y=Y};
+
+setf(R=#g01{},x,X) ->
+	R#g01{x=X};
+setf(R=#g01{},y,Y) ->
+	R#g01{y=Y};
+setf(R=#g01{},f,F) ->
+	R#g01{f=F};
+
+setf(R=#g02{},x,X) ->
+	R#g02{x=X};
+setf(R=#g02{},y,Y) ->
+	R#g02{y=Y};
+setf(R=#g02{},i,I) ->
+	R#g02{i=I};
+setf(R=#g02{},j,J) ->
+	R#g02{j=J};
+setf(R=#g02{},f,F) ->
+	R#g02{f=F};
+
+setf(R=#g03{},x,X) ->
+	R#g03{x=X};
+setf(R=#g03{},y,Y) ->
+	R#g03{y=Y};
+setf(R=#g03{},i,I) ->
+	R#g03{i=I};
+setf(R=#g03{},j,J) ->
+	R#g03{j=J};
+setf(R=#g03{},f,F) ->
+	R#g03{f=F};
+
+setf(R,z,_)->
+	R.
 
 -record(handles,{x,y}).
 
@@ -492,4 +530,80 @@ dirToRadSign(Dir) ->
 		ccw ->
 			1
 	end.
+
+readFile(Name) ->
+	{ok, Fd} = file:open(Name,[read]),
+	readFileLoop(Fd).
+
+readFileLoop(Fd) ->
+	case file:read_line(Fd) of
+		{ok, Line} ->
+			case Line of
+				[$\n | _ ] ->
+					io:format("empty line ~n", []);
+				[$( | _ ] ->
+					io:format("paranthesis line ~n", []);
+				[$% | _ ] ->
+					io:format("comment line ~n", []);
+				LikelyCode ->
+					parseCommand(LikelyCode)
+			end,
+			readFileLoop(Fd);
+		eof ->
+			ok
+	end.
+
+parseCommand(Cmd) ->
+	case Cmd of 
+		[$M | _ ] ->
+			parseMCommand(Cmd);
+		[$G | _ ] ->
+			parseGCommand(Cmd);
+		_ ->
+			io:format("ERROR: unknown command: ~p ~n", [Cmd])
+	end.
+
+parseMCommand(Cmd) ->
+	io:format("M-command: ~p ~n", [Cmd]).
+
+parseGCommand(Cmd) ->
+	% Perhaps ensure spaces to split on before cmd fields here...
+	case Cmd of
+		"G00" ++ _  ->
+			%parseG00(string:substr(Cmd,4));
+			io:format("G00-command: ~p ~n", [Cmd]),
+			fancyGVars(string:substr(Cmd,4),record_info(fields,g00),#g00{});
+		"G01" ++ _  ->
+			io:format("G01-command: ~p ~n", [Cmd]),
+			fancyGVars(string:substr(Cmd,4),record_info(fields,g01),#g01{});
+		"G02" ++ _  ->
+			io:format("G02-command: ~p ~n", [Cmd]),
+			fancyGVars(string:substr(Cmd,4),record_info(fields,g02),#g02{});
+		"G03" ++ _  ->
+			io:format("G03-command: ~p ~n", [Cmd]),
+			fancyGVars(string:substr(Cmd,4),record_info(fields,g03),#g03{});
+		_ ->
+			io:format("ERROR: unknown G-command: ~p ~n", [Cmd])
+	end.
+
+fancyGVars(S,Fields,R)->
+	fancyGVars2(string:tokens(cleanupEnd(S)," "),Fields,R).
+
+fancyGVars2([],_Fields,Rec) ->
+	io:format("loldafuq ~p~n",[Rec]),
+	Rec;
+fancyGVars2([H|R],Fields,Rec) ->
+	case list_to_atom(string:to_lower(string:substr(H,1,1))) of 
+		Type -> %when lists:member(Type,Fields) ->
+			fancyGVars2(R,Fields,setf(Rec,Type,list_to_float(string:substr(H,2))))%;
+		%_ ->
+		%	error(derp),
+		%	derp
+	end.
+
+
+
+cleanupEnd(S) ->
+	string:substr(S,1,string:cspan(S,"%(\n")).
+
 
