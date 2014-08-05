@@ -15,6 +15,8 @@
 -define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"1400\" height=\"900\"> <g transform=\"translate(0,900)\"><g transform=\"scale(1,-1)\">").
 -define(SvgEnd,"</g></g></svg>").
 
+
+% h4xx c(pistep,[{d,debug,1}]).
 -ifdef(debug).
 gpio_init(What,Dir) ->
 	What.
@@ -82,7 +84,7 @@ colorFromMode(Mode) ->
 
 start() ->
 
-	%spawn_link(?MODULE, svg_init, []),
+	spawn_link(?MODULE, svg_init, []),
 	spawn_link(?MODULE, init, []).
 
 	%loop(0, List).
