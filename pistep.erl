@@ -3,6 +3,8 @@
 -export([init/0]).
 -export([workerInit/2]).
 -export([svg_init/0]).
+-export([laser_init/0]).
+-export([second_timer/0]).
 -export([readFile/1]).
 -record(g00,{x,y}).
 -record(g01,{x,y,f}).
@@ -48,7 +50,8 @@ setf(R,z,_)->
 
 -record(handles,{x,y}).
 
--define(RES,40). %steps per mm
+%XXX-define(RES,40). %steps per mm
+-define(RES,10). %steps per mm
 
 % " style="fill:#ffffff; fill-opacity:0; stroke:#000000; stroke-width:1;"/> </g> </g> </svg>
 -define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"1400\" height=\"900\"> <g transform=\"translate(0,900)\"><g transform=\"scale(1,-1)\">").
@@ -124,13 +127,14 @@ colorFromMode(Mode) ->
 start() ->
 
 	spawn_link(?MODULE, svg_init, []),
+	spawn_link(?MODULE, laser_init, []),
 	spawn_link(?MODULE, init, []).
 
 	%loop(0, List).
 
 init() ->
 	register(gsrv, self()),
-	Worker = spawn_link(?MODULE, workerInit, [[14, 15, 17, 18],[22, 23, 24, 25]]),
+	Worker = spawn_link(?MODULE, workerInit, [[14, 15, 17, 18],[25, 24, 23, 22]]),
 	waitExecuted(Worker),
 	receive
 	after
@@ -203,7 +207,7 @@ workerInit(Xlist,Ylist) ->
 	X = [ gpio_init(P,out) || P <- Xlist ],
 	Y = [ gpio_init(P,out) || P <- Ylist],
 
-	workerLoop(#handles{x=X,y=Y}, 5, {0,0}).
+	workerLoop(#handles{x=X,y=Y}, 0.5, {0,0}).
 
 workerLoop(Handles, Feed, Position) ->
 	io:format("worker ready~n"),
@@ -220,6 +224,7 @@ workerLoop(Handles, Feed, Position) ->
 		Data = {circular,X,Y,I,J,F,Dir} ->
 			io:format("circle, ~p~n",[Data] ),
 			NewF = whichF(Feed,F,tool),
+			io:format("THAT F ~p ~n",[NewF]),
 			{{Xs,Ys},NewP} = moveFromMode(Position,{X,Y},abs),
 			%{{Is,Js},_} = moveFromMode(Position,{I,J},abs),
 			Is = I,
@@ -322,6 +327,8 @@ handle_linear(Handles,X,Y,F,Mode,Pos) ->
 	% assert tool status
 	Wait = feedToWait(F,Mode),
 
+	laserOn(Mode),
+
 	{Xhandles,Yhandles} = case Xa of
 		%Y ->
 		%	io:format("X == Y",[]);
@@ -336,6 +343,7 @@ handle_linear(Handles,X,Y,F,Mode,Pos) ->
 			{A1,A2} = line_to_steps(trunc(Y),Handles#handles.y,trunc(X),Handles#handles.x,Wait),
 			{A2,A1} % le flip 
 	end,
+	laserOff(),
 	svg ! {endsegment},
 	#handles{x=Xhandles,y=Yhandles}.
 
@@ -375,10 +383,12 @@ line_to_steps(A1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S1,S2) ->
 	end.
 handle_circular(Handles,Xt,Yt,I,J,F,Dir,AbsPos) ->
 	svg ! {segment, tool, AbsPos, 1, 1, x}, % Transperent input
+	laserOn(tool),
 	Sign = dirToRadSign(Dir),
 	Steps = myabs(pyth(I,J)*sumAngles(math:atan2(-J,-I), math:atan2(Yt-J,Xt-I), Dir)),
 	io:format("Steps: ~p Angles:~p~n",[Steps,sumAngles(math:atan2(-J,-I), math:atan2(Yt-J,Xt-I), Dir)]),
 	arc_to_steps(Handles,Steps,math:atan2(-J,-I),{0,0},{Xt,Yt},{I,J},pyth(I,J),F,Sign),
+	laserOff(),
 	svg ! {endsegment}.
 
 
@@ -460,6 +470,11 @@ stepAccordingly({handles,A1handles,A2handles},A1,A1dir,A2,A2dir,W) ->
 	receive
 		after Wait ->
 			ok
+	end,
+	laser ! {check,self()},
+	receive
+		{ok} ->
+		 	ok
 	end,
 	{handles,A1state,A2state}.
 
@@ -635,5 +650,113 @@ l2f(S) ->
 
 cleanupEnd(S) ->
 	string:substr(S,1,string:cspan(S,"%(\n")).
+
+
+laserOn(Mode) ->
+	case Mode of
+		move ->
+			laser ! {off,self()};
+		tool ->
+			laser ! {on, self()}
+	end,
+	receive
+		{ok} ->
+			ok
+	end.
+
+laserOff() ->
+	laser ! {off,self()},
+	receive
+		{ok} ->
+			ok
+	end.
+
+
+laser_init() ->
+	Pid = gpio_init(8,out),
+	register(laser,self()),
+	spawn_link(?MODULE,second_timer,[]),
+	laser_loop(Pid).
+
+laser_loop(Pid) ->
+	laser_loop(Pid,0,off).
+
+laser_loop(Pid,T,State) when T > 70 ->
+	gpio_write(Pid,0),
+	io:format("laserTMO fail, ~p~n",[State]),
+	receive
+		after 100 ->
+			ok
+	end,
+	error(lasertimeout);
+
+laser_loop(Pid,T,State) ->
+	receive
+		{check,Client} ->
+			%%% XXX assert on!
+			case T >= 60 of
+				true ->
+					gpio_write(Pid,0),
+					io:format("MEGAWAIT!",[]),
+					waitTicks(30),
+					gpio_write(Pid,1),
+					Client ! {ok},
+					laser_loop(Pid,0,State);
+				false ->
+					Client ! {ok},
+					laser_loop(Pid,T,State)
+			end;
+		{on,Client} ->
+			gpio_write(Pid,1),
+			io:format("ON~n",[]),
+			Client ! {ok},
+			laser_loop(Pid,T,on);
+		{off,Client} ->
+			Client ! {ok},
+			receive
+				Msg = {on,Client} ->
+					io:format("SEQSAVE~n",[]),
+					self() ! Msg,
+					laser_loop(Pid,T,on)
+			after 100 ->
+				gpio_write(Pid,0),
+				io:format("OFF~n",[]),
+				laser_loop(Pid,T,off)
+			end;
+		{tick} ->
+			io:format("tick!"),
+			case State of
+				on ->
+					laser_loop(Pid,T+1,State);
+				off ->
+					laser_loop(Pid,T,State)
+			end
+			
+	end.
+
+waitTicks(0) ->
+	ok;
+waitTicks(N) ->
+receive
+	{tick} ->
+		io:format("Chill!~n", []),
+		waitTicks(N-1)
+end.
+
+second_timer() ->
+	receive
+	after 1000 ->
+		laser ! {tick}
+	end,
+	second_timer().
+
+
+
+
+
+
+
+
+
 
 
