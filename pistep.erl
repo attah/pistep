@@ -50,6 +50,7 @@ setf(R,z,_)->
 
 -define(RES,40). %steps per mm
 
+% " style="fill:#ffffff; fill-opacity:0; stroke:#000000; stroke-width:1;"/> </g> </g> </svg>
 -define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"1400\" height=\"900\"> <g transform=\"translate(0,900)\"><g transform=\"scale(1,-1)\">").
 -define(SvgEnd,"</g></g></svg>").
 
@@ -167,33 +168,33 @@ gsrv(Worker) ->
 
 handle_g00(Cmd,Worker) ->
 	Worker ! {linear,
-			  Cmd#g00.x,
-			  Cmd#g00.y,
+			  Cmd#g00.x*?RES,
+			  Cmd#g00.y*?RES,
 			  maximum,
 			  move}.
 
 handle_g01(Cmd,Worker) ->
 	Worker ! {linear,
-			  Cmd#g01.x,
-			  Cmd#g01.y,
+			  Cmd#g01.x*?RES,
+			  Cmd#g01.y*?RES,
 			  Cmd#g01.f,
 			  tool}.
 
 handle_g02(Cmd,Worker) ->
 	Worker ! {circular,
-			  Cmd#g02.x,
-			  Cmd#g02.y,
-			  Cmd#g02.i,
-			  Cmd#g02.j,
+			  Cmd#g02.x*?RES,
+			  Cmd#g02.y*?RES,
+			  Cmd#g02.i*?RES,
+			  Cmd#g02.j*?RES,
 			  Cmd#g02.f,
 			  cw}.
 
 handle_g03(Cmd,Worker) ->
 	Worker ! {circular,
-			  Cmd#g03.x,
-			  Cmd#g03.y,
-			  Cmd#g03.i,
-			  Cmd#g03.j,
+			  Cmd#g03.x*?RES,
+			  Cmd#g03.y*?RES,
+			  Cmd#g03.i*?RES,
+			  Cmd#g03.j*?RES,
 			  Cmd#g03.f,
 			  ccw}.
 
@@ -213,14 +214,20 @@ workerLoop(Handles, Feed, Position) ->
 			io:format("linear, ~p~n",[Data] ),
 			%XXX use saved feed if undef!
 			NewF = whichF(Feed,F,Mode),
-			{{Xs,Ys},NewP} = moveFromMode(Position,{X,Y},rel),
+			{{Xs,Ys},NewP} = moveFromMode(Position,{X,Y},abs),
 			State = handle_linear(Handles,Xs,Ys,NewF,Mode,Position),
 			workerLoop(State, NewF,NewP);
 		Data = {circular,X,Y,I,J,F,Dir} ->
 			io:format("circle, ~p~n",[Data] ),
-			{{Xs,Ys},NewP} = moveFromMode(Position,{X,Y},rel),
-			handle_circular(Handles,Xs,Ys,I,J,F,Dir,Position),
-			workerLoop(Handles, Feed, NewP);
+			NewF = whichF(Feed,F,tool),
+			{{Xs,Ys},NewP} = moveFromMode(Position,{X,Y},abs),
+			%{{Is,Js},_} = moveFromMode(Position,{I,J},abs),
+			Is = I,
+			Js = J,
+			io:format("arcing from ~p to ~p by ~p with center ~p ~n",[Position,NewP,{Xs,Ys},{Is,Js}]),
+			%handle_circular(Handles,Xs,Ys,I,J,NewF,Dir,Position), FIXME
+			handle_circular(Handles,trunc(Xs),trunc(Ys),trunc(Is),trunc(Js),NewF,Dir,Position),
+			workerLoop(Handles, NewF, NewP);
 		{hold} ->
 			io:format("hold, ~n",[] ),
 			State = handleHold(Handles),
@@ -240,11 +247,16 @@ moveFromMode({Xi,Yi},{Xc,Yc},Mode) ->
 	end.
 
 whichF(F_old,F_new,Mode)->
-	case Mode of
-		tool ->
-			F_new;
-		move ->
-			F_old
+	case F_new of
+		undefined ->
+		 	F_old;
+		 _ ->
+			case Mode of
+				tool ->
+					F_new;
+				move ->
+					F_old
+			end
 	end.
 
 release({handles,X,Y}) ->
@@ -316,12 +328,12 @@ handle_linear(Handles,X,Y,F,Mode,Pos) ->
 		_ when Xa>=Ya ->
 			io:format("X > Y ~n",[]),
 			svg ! {segment, Mode, Pos, sign(X), sign(Y), x},
-			{A1,A2} = line_to_steps(X,Handles#handles.x,Y,Handles#handles.y,Wait),
+			{A1,A2} = line_to_steps(trunc(X),Handles#handles.x,trunc(Y),Handles#handles.y,Wait),
 			{A1,A2};
 		_ when Ya>Xa ->
 			io:format("Y > X ~n",[]),
 			svg ! {segment, Mode, Pos, sign(X), sign(Y), y},
-			{A1,A2} = line_to_steps(Y,Handles#handles.y,X,Handles#handles.x,Wait),
+			{A1,A2} = line_to_steps(trunc(Y),Handles#handles.y,trunc(X),Handles#handles.x,Wait),
 			{A2,A1} % le flip 
 	end,
 	svg ! {endsegment},
@@ -371,10 +383,23 @@ handle_circular(Handles,Xt,Yt,I,J,F,Dir,AbsPos) ->
 
 
 arc_to_steps(Handles,0,_Angle,_Pos,_TargetPos,_CenterPos,_R,_F,_Sign) ->
+	io:format("Proper circle completion ~n",[]),
 	Handles;
-arc_to_steps(Handles,Steps,_Angle,_Pos,_TargetPos,_CenterPos,_R,_F,_Sign) when Steps < 1 ->
+arc_to_steps(Handles,Steps,_Angle,Pos,TargetPos,_CenterPos,_R,F,_Sign) when Steps =< 0 ->
 	io:format("gotcha!",[]),
-	Handles;
+	{Xnow,Ynow} = Pos,
+	{Xt,Yt} = TargetPos,
+	Xd = Xt - Xnow,
+	Yd = Yt - Ynow,
+	Xda = myabs(Xd),
+	Yda = myabs(Yd),
+	case Xda+Yda of
+		S when S > 2; Xda =:= 2; Yda =:= 2 ->
+			error(notRound);
+		_S ->
+			io:format("closing circle segment~p ~p ~n", [Xd,Yd]),
+			stepAccordingly(Handles,Xd,Yd,feedToWait(F,tool)) % proper return value
+	end;
 
 arc_to_steps(Handles,Steps,Angle,Pos,TargetPos,CenterPos,R,F,Sign) ->
 	Anext = Angle+Sign*(1/R),
@@ -387,11 +412,7 @@ arc_to_steps(Handles,Steps,Angle,Pos,TargetPos,CenterPos,R,F,Sign) ->
 	Xstep = round((Xcenter + Xnext)-Xnow),
 	Ystep = round((Ycenter + Ynext)-Ynow), 
 
-	% assert ones
-
-	%case Xstep != Ystep of
-
-	%Anextnext = Anext+Sign*(1/R)
+	%% peek ahead and double step maybe...
 
 	io:format("Steps: ~p, Angle:~p, Pos:~p, TargetPos:~p, CenterPos~p, R:~p, Sign:~p, Anext:~p, Xnext:~p, Ynext:~p ~n",
 		[Steps,Angle,Pos,TargetPos,CenterPos,R,Sign,Anext,Xnext,Ynext]),
@@ -443,9 +464,12 @@ stepAccordingly({handles,A1handles,A2handles},A1,A1dir,A2,A2dir,W) ->
 	{handles,A1state,A2state}.
 
 
-
-
 sumAngles(A1,A2,Dir) ->
+	A = sumAngles2(A1,A2,Dir),
+	io:format("sumangles gives:~p ~n ", [A]),
+	A.
+
+sumAngles2(A1,A2,Dir) ->
 	io:format("Sumangles A1:~p, A2:~p, Dir:~p~n",[A1,A2,Dir]),
 	case Dir of
 		cw ->
@@ -460,9 +484,9 @@ sumAngles(A1,A2,Dir) ->
 				false ->
 					case myabs(A1) >= myabs(A2) of
 						true ->
-							2*math:pi()-(A1-A2);
+							A1-A2;
 						false -> 
-							A1-A2
+							2*math:pi()-(A1-A2)
 					end
 			end;
 		ccw ->
@@ -477,9 +501,9 @@ sumAngles(A1,A2,Dir) ->
 				false ->
 					case myabs(A2) >= myabs(A1) of
 						true ->
-							2*math:pi()-(A2-A1);
+							A2-A1;
 						false -> 
-							A2-A1
+							2*math:pi()-(A1-A2)
 					end
 			end
 	end.
@@ -595,13 +619,19 @@ fancyGVars2([],_Fields,Rec) ->
 fancyGVars2([H|R],Fields,Rec) ->
 	case list_to_atom(string:to_lower(string:substr(H,1,1))) of 
 		Type -> %when lists:member(Type,Fields) ->
-			fancyGVars2(R,Fields,setf(Rec,Type,list_to_float(string:substr(H,2))))%;
+			fancyGVars2(R,Fields,setf(Rec,Type,l2f(string:substr(H,2))))%;
 		%_ ->
 		%	error(derp),
 		%	derp
 	end.
 
-
+l2f(S) ->
+	case string:str(S,".") of
+		0 ->
+			list_to_integer(S);
+		_ ->
+			list_to_float(S)
+	end.
 
 cleanupEnd(S) ->
 	string:substr(S,1,string:cspan(S,"%(\n")).
