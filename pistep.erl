@@ -50,8 +50,8 @@ setf(R,z,_)->
 
 -record(handles,{x,y}).
 
-%XXX-define(RES,40). %steps per mm
--define(RES,10). %steps per mm
+-define(RES,40). %steps per mm
+%-define(RES,10). %steps per mm
 
 % " style="fill:#ffffff; fill-opacity:0; stroke:#000000; stroke-width:1;"/> </g> </g> </svg>
 -define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"2000\" height=\"2000\"> <g transform=\"translate(0,2000)\"><g transform=\"scale(1,-1)\">").
@@ -236,7 +236,7 @@ workerLoop(Handles, Feed, Position) ->
 			Js = J,
 			io:format("arcing from ~p to ~p by ~p with center ~p ~n",[Position,NewP,{Xs,Ys},{Is,Js}]),
 			%handle_circular(Handles,Xs,Ys,I,J,NewF,Dir,Position), FIXME
-			handle_circular(Handles,trunc(Xs),trunc(Ys),trunc(Is),trunc(Js),NewF,Dir,Position),
+			handle_circular(Handles,round(Xs),round(Ys),round(Is),round(Js),NewF,Dir,Position),
 			workerLoop(Handles, NewF, NewP);
 		{hold} ->
 			io:format("hold, ~n",[] ),
@@ -361,6 +361,9 @@ handle_linear(Handles,X,Y,F,Mode,Pos) ->
 	laserOff(), 
 	svg ! {endsegment},
 	#handles{x=Xhandles,y=Yhandles}.
+
+line_to_steps(0,A1_handles,0,A2_handles,_W) ->
+	{A1_handles,A2_handles};
 
 line_to_steps(A1,A1_handles,A2,A2_handles,W) ->
 	% 1st wait here possibly.
