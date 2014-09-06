@@ -54,13 +54,13 @@ setf(R,z,_)->
 -define(RES,10). %steps per mm
 
 % " style="fill:#ffffff; fill-opacity:0; stroke:#000000; stroke-width:1;"/> </g> </g> </svg>
--define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"1400\" height=\"900\"> <g transform=\"translate(0,900)\"><g transform=\"scale(1,-1)\">").
+-define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"2000\" height=\"2000\"> <g transform=\"translate(0,2000)\"><g transform=\"scale(1,-1)\">").
 -define(SvgEnd,"</g></g></svg>").
 
 
 % h4xx c(pistep,[{d,debug,1}]).
 -ifdef(debug).
-gpio_init(What,Dir) ->
+gpio_init(What,_Dir) ->
 	What.
 -else.
 gpio_init(What,Dir) ->
@@ -83,23 +83,28 @@ gpio_write(What,Value) ->
 
 svg_init() ->
 	register(svg, self()),
+	{ok, TFd} = file:open("time.debug", [write]),
+	file:write(TFd,io_lib:format("Start ~p ~n",[time()])),
 	case file:open("debug.svg", [write]) of
 		{ok, Fd} ->
 			file:write(Fd, ?SvgHead),
-			svg_loop(Fd);
+			svg_loop(Fd,TFd);
 		{error, Reason} ->
 			Reason
 	end.
 
-svg_loop(Fd) ->
+svg_loop(Fd,TFd) ->
 	receive 
 		{segment, M, {Xi,Yi}, Xsign, Ysign, A1} ->
 			file:write(Fd, io_lib:format("<path d=\"M~p, ~p ", [Xi,Yi])),
 			inner_svg_loop(Fd, Xsign, Ysign, A1),
 			file:write(Fd, io_lib:format("\" style=\"fill:#ffffff; fill-opacity:0; stroke:~s; stroke-width:1;\"/>",[colorFromMode(M)])),
-			svg_loop(Fd);
+			svg_loop(Fd,TFd);
 		{endprogram} ->
-			file:write(Fd, ?SvgEnd)
+			file:write(TFd,io_lib:format("End ~p ~n",[time()])),
+			file:close(TFd),
+			file:write(Fd, ?SvgEnd),
+			file:close(Fd)
 	end.
 
 
@@ -164,7 +169,7 @@ gsrv(Worker) ->
 			io:format("got something else ~p~n", [G]),
 			svg ! {endprogram},
 			receive
-				after 100 ->
+				after 1000 ->
 					exit("herp")
 			end
 	end,
@@ -235,8 +240,8 @@ workerLoop(Handles, Feed, Position) ->
 			workerLoop(Handles, NewF, NewP);
 		{hold} ->
 			io:format("hold, ~n",[] ),
-			State = handleHold(Handles),
-			workerLoop(State, Feed, Position);
+			Handles = handleHold(Handles), % Check that handles were returned in the same position
+			workerLoop(Handles, Feed, Position);
 		{release} ->
 			io:format("release~n"),
 			release(Handles),
@@ -273,6 +278,16 @@ release([A,B,C,D]) ->
 	gpio_write(C,0),
 	gpio_write(D,0).
 
+grip({handles,X,Y}) ->
+	grip(X),
+	grip(Y);
+grip([A,B,C,D]) ->
+	gpio_write(D,0),
+	gpio_write(C,0),
+	gpio_write(B,1),
+	gpio_write(A,1).
+
+
 handleHold(L) ->
 	X = handleHoldLoop(L#handles.x,8,forward),
 	Y = handleHoldLoop(L#handles.y,8,forward),
@@ -286,8 +301,8 @@ handleHoldLoop(List,N,Dir) ->
 	[A,B,C,D] = List,
 	gpio_write(D,0),
 	gpio_write(C,0),
-	gpio_write(A,1),
 	gpio_write(B,1),
+	gpio_write(A,1),
 	io:format("~p~p",[A,B]),
 	receive
 		after 5 ->
@@ -327,7 +342,7 @@ handle_linear(Handles,X,Y,F,Mode,Pos) ->
 	% assert tool status
 	Wait = feedToWait(F,Mode),
 
-	laserOn(Mode),
+	laserOn(Mode), % note 100 ms wait in laser handler when going from tool to move
 
 	{Xhandles,Yhandles} = case Xa of
 		%Y ->
@@ -343,7 +358,7 @@ handle_linear(Handles,X,Y,F,Mode,Pos) ->
 			{A1,A2} = line_to_steps(trunc(Y),Handles#handles.y,trunc(X),Handles#handles.x,Wait),
 			{A2,A1} % le flip 
 	end,
-	laserOff(),
+	laserOff(), 
 	svg ! {endsegment},
 	#handles{x=Xhandles,y=Yhandles}.
 
@@ -436,7 +451,7 @@ arc_to_steps(Handles,Steps,Angle,Pos,TargetPos,CenterPos,R,F,Sign) ->
 stepAccordingly(Handles,A1,A2,W) ->
 	stepAccordingly(Handles,myabs(A1),dir(A1),myabs(A2),dir(A2),W).
 
-stepAccordingly({handles,A1handles,A2handles},A1,A1dir,A2,A2dir,W) ->
+stepAccordingly(Handles={handles,A1handles,A2handles},A1,A1dir,A2,A2dir,W) ->
 	A1state = case A1 of
 		0 ->
 			A1handles;
@@ -467,17 +482,24 @@ stepAccordingly({handles,A1handles,A2handles},A1,A1dir,A2,A2dir,W) ->
 		0->
 			0
 	end,
-	receive
-		after Wait ->
-			ok
-	end,
-	laser ! {check,self()},
+	wait_ms(Wait),
+	laser ! {check,Handles,self()},
 	receive
 		{ok} ->
 		 	ok
 	end,
 	{handles,A1state,A2state}.
 
+-ifdef(debug).
+wait_ms(_W) ->
+	ok.
+-else.
+wait_ms(W) ->
+	receive
+		after Wait ->
+			ok
+	end.
+-endif.
 
 sumAngles(A1,A2,Dir) ->
 	A = sumAngles2(A1,A2,Dir),
@@ -692,13 +714,19 @@ laser_loop(Pid,T,State) when T > 70 ->
 
 laser_loop(Pid,T,State) ->
 	receive
-		{check,Client} ->
+		{check,Handles,Client} ->
 			%%% XXX assert on!
 			case T >= 60 of
 				true ->
 					gpio_write(Pid,0),
 					io:format("MEGAWAIT!",[]),
+					release(Handles),
 					waitTicks(30),
+					grip(Handles),
+					receive
+					after 5 ->
+						ok
+					end,
 					gpio_write(Pid,1),
 					Client ! {ok},
 					laser_loop(Pid,0,State);
@@ -719,6 +747,12 @@ laser_loop(Pid,T,State) ->
 					self() ! Msg,
 					laser_loop(Pid,T,on)
 			after 100 ->
+				%case State of
+				%	off ->
+				%		ok;
+				%	on ->
+				%		gsrv ! derp
+				%end,
 				gpio_write(Pid,0),
 				io:format("OFF~n",[]),
 				laser_loop(Pid,T,off)
@@ -734,14 +768,21 @@ laser_loop(Pid,T,State) ->
 			
 	end.
 
+-ifdef(debug).
+waitTicks(_) ->
+	ok.
+-else.
 waitTicks(0) ->
 	ok;
 waitTicks(N) ->
-receive
-	{tick} ->
-		io:format("Chill!~n", []),
-		waitTicks(N-1)
-end.
+	receive
+		{tick} ->
+			io:format("Chill!~n", []),
+			waitTicks(N-1)
+	end.
+-endif.
+
+
 
 second_timer() ->
 	receive
