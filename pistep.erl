@@ -54,7 +54,8 @@ setf(R,z,_)->
 %-define(RES,10). %steps per mm
 
 % " style="fill:#ffffff; fill-opacity:0; stroke:#000000; stroke-width:1;"/> </g> </g> </svg>
--define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"2000\" height=\"2000\"> <g transform=\"translate(0,2000)\"><g transform=\"scale(1,-1)\">").
+-define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"2000\" height=\"2500\"> ~s <g transform=\"translate(0,2500)\"><g transform=\"scale(1,-1)\">").
+-define(SvgStyle,"<style type=\"text/css\"><![CDATA[path{pointer-events:stroke;fill:none;stroke-width:1;}path.tool{stroke:#111111;}path.move{stroke:#000066;}path:hover{stroke:#660000;} ]]></style>").
 -define(SvgEnd,"</g></g></svg>").
 
 
@@ -81,26 +82,29 @@ gpio_write(What,Value) ->
 %	case lists:member(14,Handles) of
 %		true
 
+%make more rubust when gripping
+
 svg_init() ->
 	register(svg, self()),
 	{ok, TFd} = file:open("time.debug", [write]),
 	file:write(TFd,io_lib:format("Start ~p ~n",[time()])),
 	case file:open("debug.svg", [write]) of
 		{ok, Fd} ->
-			file:write(Fd, ?SvgHead),
-			svg_loop(Fd,TFd);
+			file:write(Fd, io_lib:format(?SvgHead,[?SvgStyle])),
+			svg_loop(Fd,TFd,0,0);
 		{error, Reason} ->
 			Reason
 	end.
 
-svg_loop(Fd,TFd) ->
+svg_loop(Fd,TFd, Xacc, Yacc) ->
 	receive 
 		{segment, M, {Xi,Yi}, Xsign, Ysign, A1} ->
-			file:write(Fd, io_lib:format("<path d=\"M~p, ~p ", [Xi,Yi])),
-			inner_svg_loop(Fd, Xsign, Ysign, A1),
-			file:write(Fd, io_lib:format("\" style=\"fill:#ffffff; fill-opacity:0; stroke:~s; stroke-width:1;\"/>",[colorFromMode(M)])),
-			svg_loop(Fd,TFd);
+			file:write(Fd, io_lib:format("<path class=\"~p\" d=\"M~p, ~p ", [M,Xi,Yi])),
+			{Xp,Yp} = inner_svg_loop(Fd, Xsign, Ysign, A1, Xacc, Yacc),
+			file:write(Fd, io_lib:format("\" />",[])),
+			svg_loop(Fd,TFd, Xacc+Xp, Yacc+Yp);
 		{endprogram} ->
+			%io:format("Sum ~p ~n", [{Xacc,Yacc}]),
 			file:write(TFd,io_lib:format("End ~p ~n",[time()])),
 			file:close(TFd),
 			file:write(Fd, ?SvgEnd),
@@ -108,7 +112,7 @@ svg_loop(Fd,TFd) ->
 	end.
 
 
-inner_svg_loop(Fd, Xsign, Ysign, PrimaryAxis) ->
+inner_svg_loop(Fd, Xsign, Ysign, PrimaryAxis, Xacc, Yacc) ->
 	receive 
 		{step, A1, A2} ->
 			{X,Y} = case PrimaryAxis of
@@ -116,17 +120,11 @@ inner_svg_loop(Fd, Xsign, Ysign, PrimaryAxis) ->
 				y -> {Xsign*A2,Ysign*A1}
 			end,
 			file:write(Fd, io_lib:format(" l ~p ~p ",[X,Y])),
-			inner_svg_loop(Fd, Xsign, Ysign, PrimaryAxis);
+			%io:format("Krafs! ~p, ~p, ~p ~n", [{X,Y},{Xacc,Yacc},{Xacc+X, Yacc+Y}]),
+			inner_svg_loop(Fd, Xsign, Ysign, PrimaryAxis, Xacc+X, Yacc+Y);
 		{endsegment} ->
-			ok
-	end.
-
-colorFromMode(Mode) ->
-	case Mode of
-		move ->
-			"#000066";
-		tool ->
-			"#111111"
+			%io:format("SegSum ~p ~n", [{Xacc,Yacc}]),
+			{Xacc,Yacc}
 	end.
 
 start() ->
@@ -273,19 +271,29 @@ release({handles,X,Y}) ->
 	release(X),
 	release(Y);
 release([A,B,C,D]) ->
+	wait_ms(1),
 	gpio_write(A,0),
+	wait_ms(1),
 	gpio_write(B,0),
+	wait_ms(1),
 	gpio_write(C,0),
-	gpio_write(D,0).
+	wait_ms(1),
+	gpio_write(D,0),
+	wait_ms(1).
 
 grip({handles,X,Y}) ->
 	grip(X),
 	grip(Y);
 grip([A,B,C,D]) ->
+	wait_ms(1),
 	gpio_write(D,0),
+	wait_ms(1),
 	gpio_write(C,0),
+	wait_ms(1),
 	gpio_write(B,1),
-	gpio_write(A,1).
+	wait_ms(1),
+	gpio_write(A,1),
+	wait_ms(1).
 
 
 handleHold(L) ->
@@ -382,18 +390,19 @@ line_to_steps(A1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S1,S2) ->
 		true ->
 			case A2 > 0 of
 				true ->
-					io:format("Step A2~n",[]);
+					%io:format("Step A2~n",[]);
+					ok;
 				false ->
 					io:format("WARNING we have run out of A2 steps, but more are expected.. A1=~p A2=~p S=~p Q=~p~n",[A1,A2,S1,Q]),
 					exit("wtf")
 			end,
-			io:format("Step A1 after A2~n",[]),
+			%io:format("Step A1 after A2~n",[]),
 			% wait sqrt(2)*W
 			svg ! {step, 1, 1},
 			{handles,A1state,A2state} = stepAccordingly({handles,A1_handles,A2_handles},1,A1_dir,1,A2_dir,W),
 			line_to_steps(A1-1,A1state,A1_dir,A2-1,A2state,A2_dir,Q,W,S1+1,S2+1);
 		false ->
-			io:format("Step A1 only~n",[]),
+			%io:format("Step A1 only~n",[]),
 			% wait W
 			svg ! {step, 1, 0},
 			{handles,A1state,A2state} = stepAccordingly({handles,A1_handles,A2_handles},1,A1_dir,0,A2_dir,W),
@@ -413,6 +422,9 @@ handle_circular(Handles,Xt,Yt,I,J,F,Dir,AbsPos) ->
 arc_to_steps(Handles,0,_Angle,_Pos,_TargetPos,_CenterPos,_R,_F,_Sign) ->
 	io:format("Proper circle completion ~n",[]),
 	Handles;
+arc_to_steps(Handles,Steps,_Angle,Pos,Pos,_CenterPos,_R,_F,_Sign)  when Steps =< 1 ->
+	io:format("Proper circle completion 2 ~n",[]),
+	Handles;
 arc_to_steps(Handles,Steps,_Angle,Pos,TargetPos,_CenterPos,_R,F,_Sign) when Steps =< 0 ->
 	io:format("gotcha!",[]),
 	{Xnow,Ynow} = Pos,
@@ -426,6 +438,7 @@ arc_to_steps(Handles,Steps,_Angle,Pos,TargetPos,_CenterPos,_R,F,_Sign) when Step
 			error(notRound);
 		_S ->
 			io:format("closing circle segment~p ~p ~n", [Xd,Yd]),
+			svg ! {step, Xd, Yd},
 			stepAccordingly(Handles,Xd,Yd,feedToWait(F,tool)) % proper return value
 	end;
 
@@ -442,8 +455,8 @@ arc_to_steps(Handles,Steps,Angle,Pos,TargetPos,CenterPos,R,F,Sign) ->
 
 	%% peek ahead and double step maybe...
 
-	io:format("Steps: ~p, Angle:~p, Pos:~p, TargetPos:~p, CenterPos~p, R:~p, Sign:~p, Anext:~p, Xnext:~p, Ynext:~p ~n",
-		[Steps,Angle,Pos,TargetPos,CenterPos,R,Sign,Anext,Xnext,Ynext]),
+	%io:format("Steps: ~p, Angle:~p, Pos:~p, TargetPos:~p, CenterPos~p, R:~p, Sign:~p, Anext:~p, Xnext:~p, Ynext:~p Action:~p ~n",
+	%	[Steps,Angle,Pos,TargetPos,CenterPos,R,Sign,Anext,Xnext,Ynext,{Xstep,Ystep}]),
 
 	svg ! {step, Xstep, Ystep},
 	NewHandles = stepAccordingly(Handles,Xstep,Ystep,feedToWait(F,tool)),
@@ -499,7 +512,7 @@ wait_ms(_W) ->
 -else.
 wait_ms(W) ->
 	receive
-		after Wait ->
+		after W ->
 			ok
 	end.
 -endif.
