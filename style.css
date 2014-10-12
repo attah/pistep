@@ -1,0 +1,18 @@
+
+    path{
+    		pointer-events:stroke;
+    		fill:none;
+    		stroke-width:1;
+		}
+
+		path.tool{
+    		stroke:#111111;
+		}
+
+		path.move{
+    		stroke:#000066;
+		}
+
+    path:hover{
+        stroke:#660000;
+    }

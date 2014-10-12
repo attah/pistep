@@ -54,9 +54,9 @@ setf(R,z,_)->
 %-define(RES,10). %steps per mm
 
 % " style="fill:#ffffff; fill-opacity:0; stroke:#000000; stroke-width:1;"/> </g> </g> </svg>
--define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"2000\" height=\"2500\"> ~s <g transform=\"translate(0,2500)\"><g transform=\"scale(1,-1)\">").
--define(SvgStyle,"<style type=\"text/css\"><![CDATA[path{pointer-events:stroke;fill:none;stroke-width:1;}path.tool{stroke:#111111;}path.move{stroke:#000066;}path:hover{stroke:#660000;} ]]></style>").
+-define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <?xml-stylesheet type=\"text/css\" href=\"style.css\"?> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"2000\" height=\"2500\"> <g transform=\"translate(0,2500)\"><g transform=\"scale(1,-1)\">").
 -define(SvgEnd,"</g></g></svg>").
+-define(PathEnd,"\" > <animate class=\"blink\" begin=\"indefinite\" attributeName=\"visibility\" to=\"hidden\" dur=\"1s\" repeatCount=\"indefinite\"/></path>").
 
 
 % h4xx c(pistep,[{d,debug,1}]).
@@ -90,7 +90,7 @@ svg_init() ->
 	file:write(TFd,io_lib:format("Start ~p ~n",[time()])),
 	case file:open("debug.svg", [write]) of
 		{ok, Fd} ->
-			file:write(Fd, io_lib:format(?SvgHead,[?SvgStyle])),
+			file:write(Fd, ?SvgHead),
 			svg_loop(Fd,TFd,0,0);
 		{error, Reason} ->
 			Reason
@@ -101,7 +101,7 @@ svg_loop(Fd,TFd, Xacc, Yacc) ->
 		{segment, M, {Xi,Yi}, Xsign, Ysign, A1} ->
 			file:write(Fd, io_lib:format("<path class=\"~p\" d=\"M~p, ~p ", [M,Xi,Yi])),
 			{Xp,Yp} = inner_svg_loop(Fd, Xsign, Ysign, A1, Xacc, Yacc),
-			file:write(Fd, io_lib:format("\" />",[])),
+			file:write(Fd, io_lib:format(?PathEnd,[])),
 			svg_loop(Fd,TFd, Xacc+Xp, Yacc+Yp);
 		{endprogram} ->
 			%io:format("Sum ~p ~n", [{Xacc,Yacc}]),

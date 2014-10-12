@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html>
+<body>
+<object id="canvas" data="debug.svg" type="image/svg+xml">
+</object>
+<input id="button1" type="button" value="start" onclick="begin()"/>
+
+<script>
+    function begin() {
+    if ( typeof begin.counter == 'undefined' ) {
+        // It has not... perform the initialization
+        begin.counter = 0;
+    }
+    else
+    {
+      document.getElementById("canvas").getSVGDocument().getElementsByTagName("path")[begin.counter++].getElementsByTagName("animate")[0].endElement();
+    }
+    document.getElementById("canvas").set
+      document.getElementById("canvas").getSVGDocument().getElementsByTagName("path")[begin.counter].getElementsByTagName("animate")[0].beginElement();
+    }
+</script>
+
+
+</body>
+</html>
