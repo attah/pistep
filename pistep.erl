@@ -6,6 +6,7 @@
 -export([laser_init/0]).
 -export([second_timer/0]).
 -export([readFile/1]).
+-export([sumAngles/3]).
 -record(g00,{x,y}).
 -record(g01,{x,y,f}).
 -record(g02,{x,y,i,j,f}).
@@ -517,53 +518,27 @@ wait_ms(W) ->
 	end.
 -endif.
 
-sumAngles(A1,A2,Dir) ->
-	A = sumAngles2(A1,A2,Dir),
-	io:format("sumangles gives:~p ~n ", [A]),
+sumAngles(A1,A2,ccw) when ((A1 < 0) or (A2 < 0)) ->
+	primAngle(A2+math:pi()-A1+math:pi());
+
+sumAngles(A1,A2,cw) when ((A1 < 0) or (A2 < 0)) ->	
+	primAngle(A1+math:pi()-A2+math:pi());
+
+sumAngles(A1,A2,ccw) ->
+	primAngle(A2-A1);
+
+sumAngles(A1,A2,cw) ->	
+	primAngle(A1-A2).
+
+primAngle(A) ->
+	primAngle(A,math:pi()).
+primAngle(A,Pi) when (A > 2*Pi) ->
+	A-2*math:pi();
+primAngle(A,_Pi) when A < 0 ->
+	A+2*math:pi();
+primAngle(A,_Pi) ->
 	A.
 
-sumAngles2(A1,A2,Dir) ->
-	io:format("Sumangles A1:~p, A2:~p, Dir:~p~n",[A1,A2,Dir]),
-	case Dir of
-		cw ->
-			case diffsign(A1,A2) of
-				true ->
-					case A1 > A2 of
-						true ->
-							A1+myabs(A2);
-						false ->
-							math:pi()-myabs(A1)+math:pi()-A2
-						end;
-				false ->
-					case myabs(A1) >= myabs(A2) of
-						true ->
-							A1-A2;
-						false -> 
-							2*math:pi()-(A1-A2)
-					end
-			end;
-		ccw ->
-			case diffsign(A1,A2) of
-				true ->
-					case A1 > A2 of
-						true ->
-							math:pi()-A1+math:pi()-myabs(A2);
-						false ->
-							myabs(A1)+A2
-					end;
-				false ->
-					case myabs(A2) >= myabs(A1) of
-						true ->
-							A2-A1;
-						false -> 
-							2*math:pi()-(A1-A2)
-					end
-			end
-	end.
-
-diffsign(A1,A2) ->
-	not ((A1 >=0) and (A2 >= 0)) or ((A1 <0) and (A2 < 0)).
- 
 pyth(X,Y) ->
 	math:sqrt(math:pow(myabs(X),2)+math:pow(myabs(Y),2)).
 
