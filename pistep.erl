@@ -585,24 +585,52 @@ dirToRadSign(Dir) ->
 
 readFile(Name) ->
 	{ok, Fd} = file:open(Name,[read]),
-	readFileLoop(Fd).
+	cmdFilter(readFileLoop(Fd)).
 
 readFileLoop(Fd) ->
 	case file:read_line(Fd) of
 		{ok, Line} ->
-			case Line of
-				[$\n | _ ] ->
-					io:format("empty line ~n", []);
-				[$( | _ ] ->
-					io:format("paranthesis line ~n", []);
-				[$% | _ ] ->
-					io:format("comment line ~n", []);
-				LikelyCode ->
-					parseCommand(LikelyCode)
-			end,
-			readFileLoop(Fd);
+			case lineKind(Line) of
+				comment ->
+					readFileLoop(Fd);
+				command ->
+					[ parseCommand(Line) | readFileLoop(Fd) ]
+			end;
 		eof ->
-			ok
+			[]
+	end.
+
+cmdFilter(L) ->
+	[ sanity(E) || E <- L, is_tuple(E), nonzero(E)].
+
+nonzero(Cmd=#g00{}) ->
+	(Cmd#g00.x /= undefined) and (Cmd#g00.x /= undefined);
+
+nonzero(Cmd=#g01{}) ->
+	(Cmd#g01.x /= undefined) and (Cmd#g01.x /= undefined);
+
+nonzero(Cmd) ->
+	true.
+
+sanity(Cmd=#g01{}) ->
+	Cmd#g01{f=0.5};
+sanity(Cmd=#g02{}) ->
+	Cmd#g02{f=0.5};
+sanity(Cmd=#g03{}) ->
+	Cmd#g03{f=0.5};
+sanity(Cmd) ->
+	Cmd.
+
+lineKind(L) ->
+	case L of
+		[$\n | _ ] ->
+			comment; %well, not really.. but who cares
+		[$( | _ ] ->
+			comment;
+		[$% | _ ] ->
+			comment;
+		_ ->
+			command
 	end.
 
 parseCommand(Cmd) ->
