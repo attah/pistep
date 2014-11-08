@@ -603,13 +603,15 @@ readFileLoop(Fd) ->
 cmdFilter(L) ->
 	[ sanity(E) || E <- L, is_tuple(E), nonzero(E)].
 
+%DANGER! combo of undefineds and value will behave badly
+
 nonzero(Cmd=#g00{}) ->
-	(Cmd#g00.x /= undefined) and (Cmd#g00.x /= undefined);
+	(Cmd#g00.x /= undefined) and (Cmd#g00.y /= undefined);
 
 nonzero(Cmd=#g01{}) ->
-	(Cmd#g01.x /= undefined) and (Cmd#g01.x /= undefined);
+	(Cmd#g01.x /= undefined) and (Cmd#g01.y /= undefined);
 
-nonzero(Cmd) ->
+nonzero(_Cmd) ->
 	true.
 
 sanity(Cmd=#g01{}) ->
