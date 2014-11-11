@@ -1,8 +1,8 @@
 -module(pistep).
 -export([start/0]).
 -export([init/0]).
--export([workerInit/2]).
--export([svg_init/0]).
+-export([workerInit/0]).
+-export([steps_init/0]).
 -export([laser_init/0]).
 -export([second_timer/0]).
 -export([readFile/1]).
@@ -49,7 +49,7 @@ setf(R=#g03{},f,F) ->
 setf(R,z,_)->
 	R.
 
--record(handles,{x,y}).
+% -record(handles,{x,y}).
 
 -define(RES,40). %steps per mm
 %-define(RES,10). %steps per mm
@@ -85,60 +85,109 @@ gpio_write(What,Value) ->
 
 %make more rubust when gripping
 
-svg_init() ->
-	register(svg, self()),
-	{ok, TFd} = file:open("time.debug", [write]),
-	file:write(TFd,io_lib:format("Start ~p ~n",[time()])),
-	case file:open("debug.svg", [write]) of
-		{ok, Fd} ->
-			file:write(Fd, ?SvgHead),
-			svg_loop(Fd,TFd,0,0);
-		{error, Reason} ->
-			Reason
+% svg_init() ->
+% 	register(svg, self()),
+% 	{ok, TFd} = file:open("time.debug", [write]),
+% 	file:write(TFd,io_lib:format("Start ~p ~n",[time()])),
+% 	case file:open("debug.svg", [write]) of
+% 		{ok, Fd} ->
+% 			file:write(Fd, ?SvgHead),
+% 			svg_loop(Fd,TFd,0,0);
+% 		{error, Reason} ->
+% 			Reason
+% 	end.
+
+% svg_loop(Fd,TFd, Xacc, Yacc) ->
+% 	receive 
+% 		{segment, M, {Xi,Yi}, Xsign, Ysign, A1} ->
+% 			file:write(Fd, io_lib:format("<path class=\"~p\" d=\"M~p, ~p ", [M,Xi,Yi])),
+% 			{Xp,Yp} = inner_svg_loop(Fd, Xsign, Ysign, A1, Xacc, Yacc),
+% 			file:write(Fd, io_lib:format(?PathEnd,[])),
+% 			svg_loop(Fd,TFd, Xacc+Xp, Yacc+Yp);
+% 		{endprogram} ->
+% 			%io:format("Sum ~p ~n", [{Xacc,Yacc}]),
+% 			file:write(TFd,io_lib:format("End ~p ~n",[time()])),
+% 			file:close(TFd),
+% 			file:write(Fd, ?SvgEnd),
+% 			file:close(Fd)
+% 	end.
+
+
+% inner_svg_loop(Fd, Xsign, Ysign, PrimaryAxis, Xacc, Yacc) ->
+% 	receive 
+% 		{step, A1, A2} ->
+% 			{X,Y} = case PrimaryAxis of
+% 				x -> {Xsign*A1,Ysign*A2};
+% 				y -> {Xsign*A2,Ysign*A1}
+% 			end,
+% 			file:write(Fd, io_lib:format(" l ~p ~p ",[X,Y])),
+% 			%io:format("Krafs! ~p, ~p, ~p ~n", [{X,Y},{Xacc,Yacc},{Xacc+X, Yacc+Y}]),
+% 			inner_svg_loop(Fd, Xsign, Ysign, PrimaryAxis, Xacc+X, Yacc+Y);
+% 		{endsegment} ->
+% 			%io:format("SegSum ~p ~n", [{Xacc,Yacc}]),
+% 			{Xacc,Yacc}
+% 	end.
+
+steps_init() ->
+	register(steps, self()),
+	Cmds = steps_loop([]),
+	Cmds.
+
+steps_loop(L) ->
+	receive
+		{cmd,Cmd} ->
+			steps_loop([Cmd,step_rec_loop([],Cmd) | L ]);
+		done ->
+			io:format("~p ~n",[L]),
+			L
 	end.
 
-svg_loop(Fd,TFd, Xacc, Yacc) ->
-	receive 
-		{segment, M, {Xi,Yi}, Xsign, Ysign, A1} ->
-			file:write(Fd, io_lib:format("<path class=\"~p\" d=\"M~p, ~p ", [M,Xi,Yi])),
-			{Xp,Yp} = inner_svg_loop(Fd, Xsign, Ysign, A1, Xacc, Yacc),
-			file:write(Fd, io_lib:format(?PathEnd,[])),
-			svg_loop(Fd,TFd, Xacc+Xp, Yacc+Yp);
-		{endprogram} ->
-			%io:format("Sum ~p ~n", [{Xacc,Yacc}]),
-			file:write(TFd,io_lib:format("End ~p ~n",[time()])),
-			file:close(TFd),
-			file:write(Fd, ?SvgEnd),
-			file:close(Fd)
-	end.
-
-
-inner_svg_loop(Fd, Xsign, Ysign, PrimaryAxis, Xacc, Yacc) ->
-	receive 
-		{step, A1, A2} ->
-			{X,Y} = case PrimaryAxis of
-				x -> {Xsign*A1,Ysign*A2};
-				y -> {Xsign*A2,Ysign*A1}
-			end,
-			file:write(Fd, io_lib:format(" l ~p ~p ",[X,Y])),
-			%io:format("Krafs! ~p, ~p, ~p ~n", [{X,Y},{Xacc,Yacc},{Xacc+X, Yacc+Y}]),
-			inner_svg_loop(Fd, Xsign, Ysign, PrimaryAxis, Xacc+X, Yacc+Y);
+step_rec_loop(L,Cmd) ->
+	receive
+		{step, X, Y} ->
+			step_rec_loop([{X,Y}|L],Cmd);
 		{endsegment} ->
-			%io:format("SegSum ~p ~n", [{Xacc,Yacc}]),
-			{Xacc,Yacc}
+			DoneList = lists:reverse(L),
+			FinList = case isCircle(Cmd) of
+				true ->
+					optimizeCircle(DoneList);
+				false ->
+					DoneList
+			end
+
+
 	end.
+isCircle(#g02{}) ->
+	true;
+isCircle(#g03{}) ->
+	true;
+isCircle(_Attrs) ->
+	false.	
+
+optimizeCircle([]) ->
+	[];
+optimizeCircle([{0,0} | [] ]) ->
+	[];
+optimizeCircle([{0,0} | [ Next | T ]]) ->
+	[ Next | optimizeCircle(T) ];
+optimizeCircle([{A,0} | [ {0,B} | T ]]) ->
+	[ {A,B} | optimizeCircle(T) ];
+optimizeCircle([{0,B} | [ {A,0} | T ]]) ->
+	[ {A,B} | optimizeCircle(T) ];
+optimizeCircle([ H | T ]) ->
+	[ H | optimizeCircle(T) ].
 
 start() ->
 
-	spawn_link(?MODULE, svg_init, []),
-	spawn_link(?MODULE, laser_init, []),
+	spawn_link(?MODULE, steps_init, []),
+	%spawn_link(?MODULE, laser_init, []),
 	spawn_link(?MODULE, init, []).
 
 	%loop(0, List).
 
 init() ->
 	register(gsrv, self()),
-	Worker = spawn_link(?MODULE, workerInit, [[14, 15, 17, 18],[25, 24, 23, 22]]),
+	Worker = spawn_link(?MODULE, workerInit, []),%[[14, 15, 17, 18],[25, 24, 23, 22]]),
 	waitExecuted(Worker),
 	receive
 	after
@@ -166,7 +215,7 @@ gsrv(Worker) ->
 			io:format("Segment done~n",[]);
 		G -> 
 			io:format("got something else ~p~n", [G]),
-			svg ! {endprogram},
+			%svg ! {endprogram},
 			receive
 				after 1000 ->
 					exit("herp")
@@ -175,6 +224,7 @@ gsrv(Worker) ->
 	gsrv(Worker).
 
 handle_g00(Cmd,Worker) ->
+	steps  ! {cmd,Cmd},
 	Worker ! {linear,
 			  Cmd#g00.x*?RES,
 			  Cmd#g00.y*?RES,
@@ -182,6 +232,7 @@ handle_g00(Cmd,Worker) ->
 			  move}.
 
 handle_g01(Cmd,Worker) ->
+	steps  ! {cmd,Cmd},
 	Worker ! {linear,
 			  Cmd#g01.x*?RES,
 			  Cmd#g01.y*?RES,
@@ -189,6 +240,7 @@ handle_g01(Cmd,Worker) ->
 			  tool}.
 
 handle_g02(Cmd,Worker) ->
+	steps  ! {cmd,Cmd},
 	Worker ! {circular,
 			  Cmd#g02.x*?RES,
 			  Cmd#g02.y*?RES,
@@ -198,6 +250,7 @@ handle_g02(Cmd,Worker) ->
 			  cw}.
 
 handle_g03(Cmd,Worker) ->
+	steps  ! {cmd,Cmd},
 	Worker ! {circular,
 			  Cmd#g03.x*?RES,
 			  Cmd#g03.y*?RES,
@@ -207,44 +260,31 @@ handle_g03(Cmd,Worker) ->
 			  ccw}.
 
 
-workerInit(Xlist,Ylist) ->
-	X = [ gpio_init(P,out) || P <- Xlist ],
-	Y = [ gpio_init(P,out) || P <- Ylist],
+workerInit() ->
 
-	workerLoop(#handles{x=X,y=Y}, 0.5, {0,0}).
 
-workerLoop(Handles, Feed, Position) ->
+	workerLoop({0,0}).
+
+workerLoop(Position) ->
 	io:format("worker ready~n"),
 	gsrv ! {done,self()},
-	release(Handles),
 	receive
-		Data = {linear,X,Y,F,Mode} ->
+		Data = {linear,X,Y,_F,_Mode} ->
 			io:format("linear, ~p~n",[Data] ),
 			%XXX use saved feed if undef!
-			NewF = whichF(Feed,F,Mode),
 			{{Xs,Ys},NewP} = moveFromMode(Position,{X,Y},abs),
-			State = handle_linear(Handles,Xs,Ys,NewF,Mode,Position),
-			workerLoop(State, NewF,NewP);
-		Data = {circular,X,Y,I,J,F,Dir} ->
+			handle_linear(Xs,Ys),
+			workerLoop(NewP);
+		Data = {circular,X,Y,I,J,_F,Dir} ->
 			io:format("circle, ~p~n",[Data] ),
-			NewF = whichF(Feed,F,tool),
-			io:format("THAT F ~p ~n",[NewF]),
 			{{Xs,Ys},NewP} = moveFromMode(Position,{X,Y},abs),
 			%{{Is,Js},_} = moveFromMode(Position,{I,J},abs),
 			Is = I,
 			Js = J,
 			io:format("arcing from ~p to ~p by ~p with center ~p ~n",[Position,NewP,{Xs,Ys},{Is,Js}]),
 			%handle_circular(Handles,Xs,Ys,I,J,NewF,Dir,Position), FIXME
-			handle_circular(Handles,round(Xs),round(Ys),round(Is),round(Js),NewF,Dir,Position),
-			workerLoop(Handles, NewF, NewP);
-		{hold} ->
-			io:format("hold, ~n",[] ),
-			Handles = handleHold(Handles), % Check that handles were returned in the same position
-			workerLoop(Handles, Feed, Position);
-		{release} ->
-			io:format("release~n"),
-			release(Handles),
-			workerLoop(Handles, Feed, Position)
+			handle_circular(round(Xs),round(Ys),round(Is),round(Js),Dir),
+			workerLoop(NewP)
 	end.
 
 moveFromMode({Xi,Yi},{Xc,Yc},Mode) ->
@@ -255,18 +295,18 @@ moveFromMode({Xi,Yi},{Xc,Yc},Mode) ->
 			{{Xc-Xi,Yc-Yi},{Xc,Yc}}
 	end.
 
-whichF(F_old,F_new,Mode)->
-	case F_new of
-		undefined ->
-		 	F_old;
-		 _ ->
-			case Mode of
-				tool ->
-					F_new;
-				move ->
-					F_old
-			end
-	end.
+% whichF(F_old,F_new,Mode)->
+% 	case F_new of
+% 		undefined ->
+% 		 	F_old;
+% 		 _ ->
+% 			case Mode of
+% 				tool ->
+% 					F_new;
+% 				move ->
+% 					F_old
+% 			end
+% 	end.
 
 release({handles,X,Y}) ->
 	release(X),
@@ -297,26 +337,26 @@ grip([A,B,C,D]) ->
 	wait_ms(1).
 
 
-handleHold(L) ->
-	X = handleHoldLoop(L#handles.x,8,forward),
-	Y = handleHoldLoop(L#handles.y,8,forward),
-	#handles{x=X,y=Y}.
+% handleHold(L) ->
+% 	X = handleHoldLoop(L#handles.x,8,forward),
+% 	Y = handleHoldLoop(L#handles.y,8,forward),
+% 	#handles{x=X,y=Y}.
 
-handleHoldLoop(L,0,_Dir)->
-	L;
-handleHoldLoop(L,4,forward) ->
-	handleHoldLoop(L,4,backward);
-handleHoldLoop(List,N,Dir) ->
-	[A,B,C,D] = List,
-	gpio_write(D,0),
-	gpio_write(C,0),
-	gpio_write(B,1),
-	gpio_write(A,1),
-	io:format("~p~p",[A,B]),
-	receive
-		after 5 ->
-			handleHoldLoop(shiftAccordingly(List, Dir),N-1,Dir)
-	end.
+% handleHoldLoop(L,0,_Dir)->
+% 	L;
+% handleHoldLoop(L,4,forward) ->
+% 	handleHoldLoop(L,4,backward);
+% handleHoldLoop(List,N,Dir) ->
+% 	[A,B,C,D] = List,
+% 	gpio_write(D,0),
+% 	gpio_write(C,0),
+% 	gpio_write(B,1),
+% 	gpio_write(A,1),
+% 	io:format("~p~p",[A,B]),
+% 	receive
+% 		after 5 ->
+% 			handleHoldLoop(shiftAccordingly(List, Dir),N-1,Dir)
+% 	end.
 
 shiftAccordingly([A,B,C,D], Dir) ->
 	case Dir of
@@ -342,49 +382,44 @@ waitExecuted(Pid, Time) ->
 			error("fail timeout")
 	end.
 
-handle_linear(Handles,X,Y,F,Mode,Pos) ->
+handle_linear(X,Y) ->
 	io:format("handle linear",[]),
 		
 	Xa = myabs(X),
 	Ya = myabs(Y),
 
-	% assert tool status
-	Wait = feedToWait(F,Mode),
 
-	laserOn(Mode), % note 100 ms wait in laser handler when going from tool to move
+	% laserOn(Mode), % note 100 ms wait in laser handler when going from tool to move
 
-	{Xhandles,Yhandles} = case Xa of
+	case Xa of
 		%Y ->
 		%	io:format("X == Y",[]);
 		_ when Xa>=Ya ->
 			io:format("X > Y ~n",[]),
-			svg ! {segment, Mode, Pos, sign(X), sign(Y), x},
-			{A1,A2} = line_to_steps(trunc(X),Handles#handles.x,trunc(Y),Handles#handles.y,Wait),
-			{A1,A2};
+			%svg ! {segment, Mode, Pos, sign(X), sign(Y), x},
+			line_to_steps(trunc(X),trunc(Y),x);
 		_ when Ya>Xa ->
 			io:format("Y > X ~n",[]),
-			svg ! {segment, Mode, Pos, sign(X), sign(Y), y},
-			{A1,A2} = line_to_steps(trunc(Y),Handles#handles.y,trunc(X),Handles#handles.x,Wait),
-			{A2,A1} % le flip 
+			%svg ! {segment, Mode, Pos, sign(X), sign(Y), y},
+			line_to_steps(trunc(Y),trunc(X),y)
 	end,
-	laserOff(), 
-	svg ! {endsegment},
-	#handles{x=Xhandles,y=Yhandles}.
+	% laserOff(), 
+	steps ! {endsegment}.
 
-line_to_steps(0,A1_handles,0,A2_handles,_W) ->
-	{A1_handles,A2_handles};
+line_to_steps(0,0,_A) ->
+	ok;
 
-line_to_steps(A1,A1_handles,A2,A2_handles,W) ->
+line_to_steps(A1,A2,Axis) ->
 	% 1st wait here possibly.
-	line_to_steps(myabs(A1),A1_handles,dir(A1),myabs(A2),A2_handles,dir(A2),myabs(A2)/myabs(A1),W,0,0).
+	line_to_steps(myabs(A1),sign(A1),myabs(A2),sign(A2),myabs(A2)/myabs(A1),0,0,Axis).
 
-line_to_steps(0,A1_handles,_,0,A2_handles,_,_Q,_W,_S1,_S2) ->
-	{A1_handles,A2_handles};
-line_to_steps(0,_,_,A2,_,_,_Q,_F,_S1,_S2) ->
+line_to_steps(0,_,0,_,_Q,_S1,_S2,_A) ->
+	ok;
+line_to_steps(0,_,A2,_,_Q,_S1,_S2,_A) ->
 	io:format("missed ~p A2-steps!~n",[A2]),
 	error("missed A2-steps!");
 
-line_to_steps(A1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S1,S2) ->
+line_to_steps(A1,A1_sign,A2,A2_sign,Q,S1,S2,Axis) ->
 		  %S1+1 = what we are stepping to. 
 		  % 0.5 to step half way in between, also eliminates need for >=
 	case ((S1+1)*Q)>(0.5+S2) of
@@ -399,34 +434,48 @@ line_to_steps(A1,A1_handles,A1_dir,A2,A2_handles,A2_dir,Q,W,S1,S2) ->
 			end,
 			%io:format("Step A1 after A2~n",[]),
 			% wait sqrt(2)*W
-			svg ! {step, 1, 1},
-			{handles,A1state,A2state} = stepAccordingly({handles,A1_handles,A2_handles},1,A1_dir,1,A2_dir,W),
-			line_to_steps(A1-1,A1state,A1_dir,A2-1,A2state,A2_dir,Q,W,S1+1,S2+1);
+			case Axis of
+				x ->
+					steps ! {step, A1_sign, A2_sign};
+				y ->
+					steps ! {step, A2_sign, A1_sign}
+			end,
+
+			%{handles,A1state,A2state} = stepAccordingly({handles,A1_handles,A2_handles},1,A1_dir,1,A2_dir,W),
+			line_to_steps(A1-1,A1_sign,A2-1,A2_sign,Q,S1+1,S2+1,Axis);
 		false ->
 			%io:format("Step A1 only~n",[]),
 			% wait W
-			svg ! {step, 1, 0},
-			{handles,A1state,A2state} = stepAccordingly({handles,A1_handles,A2_handles},1,A1_dir,0,A2_dir,W),
-			line_to_steps(A1-1,A1state,A1_dir,A2,A2state,A2_dir,Q,W,S1+1,S2)
+			case Axis of
+				x ->
+					steps ! {step, A1_sign, 0};
+				y ->
+					steps ! {step, 0, A1_sign}
+			end,
+			%{handles,A1state,A2state} = stepAccordingly({handles,A1_handles,A2_handles},1,A1_dir,0,A2_dir,W),
+			line_to_steps(A1-1,A1_sign,A2,A2_sign,Q,S1+1,S2,Axis)
 	end.
-handle_circular(Handles,Xt,Yt,I,J,F,Dir,AbsPos) ->
-	svg ! {segment, tool, AbsPos, 1, 1, x}, % Transperent input
-	laserOn(tool),
+
+
+
+handle_circular(Xt,Yt,I,J,Dir) ->
+	%svg ! {segment, tool, AbsPos, 1, 1, x}, % Transperent input
+	%laserOn(tool),
 	Sign = dirToRadSign(Dir),
 	Steps = myabs(pyth(I,J)*sumAngles(math:atan2(-J,-I), math:atan2(Yt-J,Xt-I), Dir)),
 	io:format("Steps: ~p Angles:~p~n",[Steps,sumAngles(math:atan2(-J,-I), math:atan2(Yt-J,Xt-I), Dir)]),
-	arc_to_steps(Handles,Steps,math:atan2(-J,-I),{0,0},{Xt,Yt},{I,J},pyth(I,J),F,Sign),
-	laserOff(),
-	svg ! {endsegment}.
+	arc_to_steps(Steps,math:atan2(-J,-I),{0,0},{Xt,Yt},{I,J},pyth(I,J),Sign),
+	%laserOff(),
+	steps ! {endsegment}.
 
 
-arc_to_steps(Handles,0,_Angle,_Pos,_TargetPos,_CenterPos,_R,_F,_Sign) ->
+arc_to_steps(0,_Angle,_Pos,_TargetPos,_CenterPos,_R,_Sign) ->
 	io:format("Proper circle completion ~n",[]),
-	Handles;
-arc_to_steps(Handles,Steps,_Angle,Pos,Pos,_CenterPos,_R,_F,_Sign)  when Steps =< 1 ->
+	ok;
+arc_to_steps(Steps,_Angle,Pos,Pos,_CenterPos,_R,_Sign)  when Steps =< 1 ->
 	io:format("Proper circle completion 2 ~n",[]),
-	Handles;
-arc_to_steps(Handles,Steps,_Angle,Pos,TargetPos,_CenterPos,_R,F,_Sign) when Steps =< 0 ->
+	ok;
+arc_to_steps(Steps,_Angle,Pos,TargetPos,_CenterPos,_R,_Sign) when Steps =< 0 ->
 	io:format("gotcha!",[]),
 	{Xnow,Ynow} = Pos,
 	{Xt,Yt} = TargetPos,
@@ -439,11 +488,10 @@ arc_to_steps(Handles,Steps,_Angle,Pos,TargetPos,_CenterPos,_R,F,_Sign) when Step
 			error(notRound);
 		_S ->
 			io:format("closing circle segment~p ~p ~n", [Xd,Yd]),
-			svg ! {step, Xd, Yd},
-			stepAccordingly(Handles,Xd,Yd,feedToWait(F,tool)) % proper return value
+			steps ! {step, Xd, Yd}
 	end;
 
-arc_to_steps(Handles,Steps,Angle,Pos,TargetPos,CenterPos,R,F,Sign) ->
+arc_to_steps(Steps,Angle,Pos,TargetPos,CenterPos,R,Sign) ->
 	Anext = Angle+Sign*(1/R),
 
 	{Xnow,Ynow} = Pos,
@@ -459,53 +507,52 @@ arc_to_steps(Handles,Steps,Angle,Pos,TargetPos,CenterPos,R,F,Sign) ->
 	%io:format("Steps: ~p, Angle:~p, Pos:~p, TargetPos:~p, CenterPos~p, R:~p, Sign:~p, Anext:~p, Xnext:~p, Ynext:~p Action:~p ~n",
 	%	[Steps,Angle,Pos,TargetPos,CenterPos,R,Sign,Anext,Xnext,Ynext,{Xstep,Ystep}]),
 
-	svg ! {step, Xstep, Ystep},
-	NewHandles = stepAccordingly(Handles,Xstep,Ystep,feedToWait(F,tool)),
+	steps ! {step, Xstep, Ystep},
 
-	arc_to_steps(NewHandles,Steps-1,Anext,{Xnow+Xstep,Ynow+Ystep},TargetPos,CenterPos,R,F,Sign).
+	arc_to_steps(Steps-1,Anext,{Xnow+Xstep,Ynow+Ystep},TargetPos,CenterPos,R,Sign).
 
 
-stepAccordingly(Handles,A1,A2,W) ->
-	stepAccordingly(Handles,myabs(A1),dir(A1),myabs(A2),dir(A2),W).
+% stepAccordingly(Handles,A1,A2,W) ->
+% 	stepAccordingly(Handles,myabs(A1),dir(A1),myabs(A2),dir(A2),W).
 
-stepAccordingly(Handles={handles,A1handles,A2handles},A1,A1dir,A2,A2dir,W) ->
-	A1state = case A1 of
-		0 ->
-			A1handles;
-		1 ->
-			[H11,H12,H13,H14] = shiftAccordingly(A1handles, A1dir),
-			gpio:write(H14,0),
-			gpio:write(H13,0),
-			gpio:write(H11,1),
-			gpio:write(H12,1),
-			[H11,H12,H13,H14]
-	end,
-	A2state = case A2 of
-		0 ->
-			A2handles;
-		1 ->
-			[H21,H22,H23,H24] = shiftAccordingly(A2handles,A2dir),
-			gpio:write(H24,0),
-			gpio:write(H23,0),
-			gpio:write(H21,1),
-			gpio:write(H22,1),
-			[H21,H22,H23,H24] 
-	end,
-	Wait = case A1+A2 of
-		2 ->
-			round(1.4*W);
-		1 ->
-			W;
-		0->
-			0
-	end,
-	wait_ms(Wait),
-	laser ! {check,Handles,self()},
-	receive
-		{ok} ->
-		 	ok
-	end,
-	{handles,A1state,A2state}.
+% stepAccordingly(Handles={handles,A1handles,A2handles},A1,A1dir,A2,A2dir,W) ->
+% 	A1state = case A1 of
+% 		0 ->
+% 			A1handles;
+% 		1 ->
+% 			[H11,H12,H13,H14] = shiftAccordingly(A1handles, A1dir),
+% 			gpio:write(H14,0),
+% 			gpio:write(H13,0),
+% 			gpio:write(H11,1),
+% 			gpio:write(H12,1),
+% 			[H11,H12,H13,H14]
+% 	end,
+% 	A2state = case A2 of
+% 		0 ->
+% 			A2handles;
+% 		1 ->
+% 			[H21,H22,H23,H24] = shiftAccordingly(A2handles,A2dir),
+% 			gpio:write(H24,0),
+% 			gpio:write(H23,0),
+% 			gpio:write(H21,1),
+% 			gpio:write(H22,1),
+% 			[H21,H22,H23,H24] 
+% 	end,
+% 	Wait = case A1+A2 of
+% 		2 ->
+% 			round(1.4*W);
+% 		1 ->
+% 			W;
+% 		0->
+% 			0
+% 	end,
+% 	wait_ms(Wait),
+% 	laser ! {check,Handles,self()},
+% 	receive
+% 		{ok} ->
+% 		 	ok
+% 	end,
+% 	{handles,A1state,A2state}.
 
 -ifdef(debug).
 wait_ms(_W) ->
