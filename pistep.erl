@@ -95,7 +95,7 @@ do_svg(L) ->
 			Reason
 	end.
 svg_loop(_Fd, [], _Xacc, _Yacc) ->
-	steps ! done;
+	ok;
 svg_loop(Fd, [{Cmd , L} | T], Xacc, Yacc) ->
 	%%%XXX: sanity-sum commands and instructions?
 	M = mode(Cmd),
@@ -113,14 +113,29 @@ inner_svg_loop(Fd, [{X,Y} | T], Xacc, Yacc) ->
 
 steps_init() ->
 	register(steps, self()),
-	Cmds = lists:reverse(steps_loop([])),
-	do_svg(Cmds),
-	Cmds.
+	steps_init_2().
 
-steps_loop(L) ->
+steps_init_2() ->
+	Cmds = lists:reverse(step_cmd_loop([])),
+	do_svg(Cmds),
+	steps_loop(Cmds),
+	steps_init_2().
+
+steps_loop(Cmds) ->
+	receive
+		exit ->
+			exit("ok");
+		reset ->
+			ok;
+		run ->
+			%step_runner(Cmds),
+			steps_loop(Cmds)
+	end.
+
+step_cmd_loop(L) ->
 	receive
 		{cmd,Cmd} ->
-			steps_loop([{Cmd,step_rec_loop([],Cmd)} | L ]);
+			step_cmd_loop([{Cmd,step_rec_loop([],Cmd)} | L ]);
 		done ->
 			io:format("~p ~n",[L]),
 			L
@@ -179,11 +194,12 @@ gs_in(L)->
 		ok
 	end,
 	gsrv(L).
+
 gsrv([])->
+	worker ! done,
 	ok;
 
 gsrv([Cmd | T ]) ->
-	% unnecessary? Remove?
 	case Cmd of
 		G00=#g00{} ->
 			io:format("got g00 ~p~n", [G00]),
@@ -266,7 +282,9 @@ workerLoop(Position) ->
 			io:format("arcing from ~p to ~p by ~p with center ~p ~n",[Position,NewP,{Xs,Ys},{Is,Js}]),
 			%handle_circular(Handles,Xs,Ys,I,J,NewF,Dir,Position), FIXME
 			handle_circular(round(Xs),round(Ys),round(Is),round(Js),Dir),
-			workerLoop(NewP)
+			workerLoop(NewP);
+		done ->
+			steps ! done
 	end.
 
 moveFromMode({Xi,Yi},{Xc,Yc},Mode) ->
@@ -276,19 +294,6 @@ moveFromMode({Xi,Yi},{Xc,Yc},Mode) ->
 		abs -> 
 			{{Xc-Xi,Yc-Yi},{Xc,Yc}}
 	end.
-
-% whichF(F_old,F_new,Mode)->
-% 	case F_new of
-% 		undefined ->
-% 		 	F_old;
-% 		 _ ->
-% 			case Mode of
-% 				tool ->
-% 					F_new;
-% 				move ->
-% 					F_old
-% 			end
-% 	end.
 
 release({handles,X,Y}) ->
 	release(X),
