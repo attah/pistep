@@ -1,6 +1,5 @@
 -module(pistep).
 -export([start/0]).
--export([init/0]).
 -export([workerInit/0]).
 -export([steps_init/0]).
 -export([laser_init/0]).
@@ -57,7 +56,7 @@ setf(R,z,_)->
 % " style="fill:#ffffff; fill-opacity:0; stroke:#000000; stroke-width:1;"/> </g> </g> </svg>
 -define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <?xml-stylesheet type=\"text/css\" href=\"style.css\"?> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"2000\" height=\"2500\"> <g transform=\"translate(0,2500)\"><g transform=\"scale(1,-1)\">").
 -define(SvgEnd,"</g></g></svg>").
--define(PathEnd,"\" > <animate class=\"blink\" begin=\"indefinite\" attributeName=\"visibility\" to=\"hidden\" dur=\"1s\" repeatCount=\"indefinite\"/></path>").
+-define(PathEnd,"\" > <title>~p</title> <animate class=\"blink\" begin=\"indefinite\" attributeName=\"visibility\" to=\"hidden\" dur=\"1s\" repeatCount=\"indefinite\"/></path>").
 
 
 % h4xx c(pistep,[{d,debug,1}]).
@@ -85,58 +84,43 @@ gpio_write(What,Value) ->
 
 %make more rubust when gripping
 
-% svg_init() ->
-% 	register(svg, self()),
-% 	{ok, TFd} = file:open("time.debug", [write]),
-% 	file:write(TFd,io_lib:format("Start ~p ~n",[time()])),
-% 	case file:open("debug.svg", [write]) of
-% 		{ok, Fd} ->
-% 			file:write(Fd, ?SvgHead),
-% 			svg_loop(Fd,TFd,0,0);
-% 		{error, Reason} ->
-% 			Reason
-% 	end.
+do_svg(L) ->
+	case file:open("debug.svg", [write]) of
+		{ok, Fd} ->
+			file:write(Fd, ?SvgHead),
+			svg_loop(Fd,L,0,0),
+			file:write(Fd, ?SvgEnd),
+			file:close(Fd);
+		{error, Reason} ->
+			Reason
+	end.
+svg_loop(_Fd, [], _Xacc, _Yacc) ->
+	steps ! done;
+svg_loop(Fd, [{Cmd , L} | T], Xacc, Yacc) ->
+	%%%XXX: sanity-sum commands and instructions?
+	M = mode(Cmd),
+	file:write(Fd, io_lib:format("<path class=\"~p\" d=\"M~p, ~p ", [M,Xacc,Yacc])),
+	{Xp,Yp} = inner_svg_loop(Fd, L, 0, 0),
+	file:write(Fd, io_lib:format(?PathEnd,[Cmd])),
+	svg_loop(Fd, T, Xacc+Xp, Yacc+Yp).  %% Adjust for absolute mode
 
-% svg_loop(Fd,TFd, Xacc, Yacc) ->
-% 	receive 
-% 		{segment, M, {Xi,Yi}, Xsign, Ysign, A1} ->
-% 			file:write(Fd, io_lib:format("<path class=\"~p\" d=\"M~p, ~p ", [M,Xi,Yi])),
-% 			{Xp,Yp} = inner_svg_loop(Fd, Xsign, Ysign, A1, Xacc, Yacc),
-% 			file:write(Fd, io_lib:format(?PathEnd,[])),
-% 			svg_loop(Fd,TFd, Xacc+Xp, Yacc+Yp);
-% 		{endprogram} ->
-% 			%io:format("Sum ~p ~n", [{Xacc,Yacc}]),
-% 			file:write(TFd,io_lib:format("End ~p ~n",[time()])),
-% 			file:close(TFd),
-% 			file:write(Fd, ?SvgEnd),
-% 			file:close(Fd)
-% 	end.
+inner_svg_loop(_Fd, [], Xacc, Yacc) ->
+	{Xacc,Yacc};
+inner_svg_loop(Fd, [{X,Y} | T], Xacc, Yacc) ->
 
-
-% inner_svg_loop(Fd, Xsign, Ysign, PrimaryAxis, Xacc, Yacc) ->
-% 	receive 
-% 		{step, A1, A2} ->
-% 			{X,Y} = case PrimaryAxis of
-% 				x -> {Xsign*A1,Ysign*A2};
-% 				y -> {Xsign*A2,Ysign*A1}
-% 			end,
-% 			file:write(Fd, io_lib:format(" l ~p ~p ",[X,Y])),
-% 			%io:format("Krafs! ~p, ~p, ~p ~n", [{X,Y},{Xacc,Yacc},{Xacc+X, Yacc+Y}]),
-% 			inner_svg_loop(Fd, Xsign, Ysign, PrimaryAxis, Xacc+X, Yacc+Y);
-% 		{endsegment} ->
-% 			%io:format("SegSum ~p ~n", [{Xacc,Yacc}]),
-% 			{Xacc,Yacc}
-% 	end.
+	file:write(Fd, io_lib:format(" l ~p ~p ",[X,Y])),
+	inner_svg_loop(Fd, T, Xacc+X, Yacc+Y).
 
 steps_init() ->
 	register(steps, self()),
-	Cmds = steps_loop([]),
+	Cmds = lists:reverse(steps_loop([])),
+	do_svg(Cmds),
 	Cmds.
 
 steps_loop(L) ->
 	receive
 		{cmd,Cmd} ->
-			steps_loop([Cmd,step_rec_loop([],Cmd) | L ]);
+			steps_loop([{Cmd,step_rec_loop([],Cmd)} | L ]);
 		done ->
 			io:format("~p ~n",[L]),
 			L
@@ -148,15 +132,14 @@ step_rec_loop(L,Cmd) ->
 			step_rec_loop([{X,Y}|L],Cmd);
 		{endsegment} ->
 			DoneList = lists:reverse(L),
-			FinList = case isCircle(Cmd) of
+			case isCircle(Cmd) of
 				true ->
 					optimizeCircle(DoneList);
 				false ->
 					DoneList
-			end
-
-
+			end %%return value
 	end.
+
 isCircle(#g02{}) ->
 	true;
 isCircle(#g03{}) ->
@@ -170,49 +153,50 @@ optimizeCircle([{0,0} | [] ]) ->
 	[];
 optimizeCircle([{0,0} | [ Next | T ]]) ->
 	[ Next | optimizeCircle(T) ];
-optimizeCircle([{A,0} | [ {0,B} | T ]]) ->
-	[ {A,B} | optimizeCircle(T) ];
-optimizeCircle([{0,B} | [ {A,0} | T ]]) ->
-	[ {A,B} | optimizeCircle(T) ];
+optimizeCircle([{1,0} | [ {0,1} | T ]]) ->
+	[ {1,1} | optimizeCircle(T) ];
+optimizeCircle([{0,1} | [ {1,0} | T ]]) ->
+	[ {1,1} | optimizeCircle(T) ];
 optimizeCircle([ H | T ]) ->
 	[ H | optimizeCircle(T) ].
 
+
+
 start() ->
 
-	spawn_link(?MODULE, steps_init, []),
+	spawn_link(?MODULE, steps_init, []).
 	%spawn_link(?MODULE, laser_init, []),
-	spawn_link(?MODULE, init, []).
+	%Worker = spawn_link(?MODULE, workerInit, []),%[[14, 15, 17, 18],[25, 24, 23, 22]]),
+	%().
+	%workerInit().
+	%gsrv(Worker).
 
-	%loop(0, List).
-
-init() ->
-	register(gsrv, self()),
-	Worker = spawn_link(?MODULE, workerInit, []),%[[14, 15, 17, 18],[25, 24, 23, 22]]),
-	waitExecuted(Worker),
+gs_in(L)->
+	spawn_link(?MODULE, workerInit, []), %lives one calculation round
 	receive
 	after
 		1000 ->
 		ok
 	end,
-	gsrv(Worker).
+	gsrv(L).
+gsrv([])->
+	ok;
 
-gsrv(Worker) ->
+gsrv([Cmd | T ]) ->
 	% unnecessary? Remove?
-	receive
+	case Cmd of
 		G00=#g00{} ->
 			io:format("got g00 ~p~n", [G00]),
-			handle_g00(G00,Worker);
+			handle_g00(G00);
 		G01=#g01{} ->
 			io:format("got g01 ~p~n", [G01]),
-			handle_g01(G01,Worker);
+			handle_g01(G01);
 		G02=#g02{} ->
 			io:format("got g02 ~p~n", [G02]),
-			handle_g02(G02,Worker);
+			handle_g02(G02);
 		G03=#g03{} ->
 			io:format("got g03 ~p~n", [G03]),
-			handle_g03(G03,Worker);
-		{done,_Pid} ->
-			io:format("Segment done~n",[]);
+			handle_g03(G03);
 		G -> 
 			io:format("got something else ~p~n", [G]),
 			%svg ! {endprogram},
@@ -221,27 +205,27 @@ gsrv(Worker) ->
 					exit("herp")
 			end
 	end,
-	gsrv(Worker).
+	gsrv(T).
 
-handle_g00(Cmd,Worker) ->
+handle_g00(Cmd) ->
 	steps  ! {cmd,Cmd},
-	Worker ! {linear,
+	worker ! {linear,
 			  Cmd#g00.x*?RES,
 			  Cmd#g00.y*?RES,
 			  maximum,
 			  move}.
 
-handle_g01(Cmd,Worker) ->
+handle_g01(Cmd) ->
 	steps  ! {cmd,Cmd},
-	Worker ! {linear,
+	worker ! {linear,
 			  Cmd#g01.x*?RES,
 			  Cmd#g01.y*?RES,
 			  Cmd#g01.f,
 			  tool}.
 
-handle_g02(Cmd,Worker) ->
+handle_g02(Cmd) ->
 	steps  ! {cmd,Cmd},
-	Worker ! {circular,
+	worker ! {circular,
 			  Cmd#g02.x*?RES,
 			  Cmd#g02.y*?RES,
 			  Cmd#g02.i*?RES,
@@ -249,9 +233,9 @@ handle_g02(Cmd,Worker) ->
 			  Cmd#g02.f,
 			  cw}.
 
-handle_g03(Cmd,Worker) ->
+handle_g03(Cmd) ->
 	steps  ! {cmd,Cmd},
-	Worker ! {circular,
+	worker ! {circular,
 			  Cmd#g03.x*?RES,
 			  Cmd#g03.y*?RES,
 			  Cmd#g03.i*?RES,
@@ -261,13 +245,11 @@ handle_g03(Cmd,Worker) ->
 
 
 workerInit() ->
-
+	register(worker,self()),
 
 	workerLoop({0,0}).
 
 workerLoop(Position) ->
-	io:format("worker ready~n"),
-	gsrv ! {done,self()},
 	receive
 		Data = {linear,X,Y,_F,_Mode} ->
 			io:format("linear, ~p~n",[Data] ),
@@ -364,22 +346,6 @@ shiftAccordingly([A,B,C,D], Dir) ->
 			[B,C,D,A];
 		backward ->
 			[D,A,B,C]
-	end.
-
-waitExecuted(Pid) ->
-	waitExecuted(Pid, 10000).
-
-waitExecuted(Pid, Time) ->
-	receive
-		{done, Pid} ->
-			ok;
-		F ->
-			io:format("fail response: ~p ~p", [F,Pid]),
-			error("fail response")
-	after 
-		Time ->
-			io:format("fail timeout ~p", [Time]),
-			error("fail timeout")
 	end.
 
 handle_linear(X,Y) ->
@@ -630,9 +596,19 @@ dirToRadSign(Dir) ->
 			1
 	end.
 
+mode(#g00{}) ->
+	move;
+mode(#g01{}) ->
+	tool;
+mode(#g02{}) ->
+	tool;
+mode(#g03{}) ->
+	tool.
+
+
 readFile(Name) ->
 	{ok, Fd} = file:open(Name,[read]),
-	cmdFilter(readFileLoop(Fd)).
+	gs_in(cmdFilter(readFileLoop(Fd))).
 
 readFileLoop(Fd) ->
 	case file:read_line(Fd) of
@@ -815,12 +791,6 @@ laser_loop(Pid,T,State) ->
 					self() ! Msg,
 					laser_loop(Pid,T,on)
 			after 100 ->
-				%case State of
-				%	off ->
-				%		ok;
-				%	on ->
-				%		gsrv ! derp
-				%end,
 				gpio_write(Pid,0),
 				io:format("OFF~n",[]),
 				laser_loop(Pid,T,off)
