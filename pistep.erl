@@ -3,6 +3,7 @@
 -export([workerInit/0]).
 -export([steps_init/0]).
 -export([laser_init/0]).
+-export([step_runner_init/0]).
 -export([second_timer/0]).
 -export([readFile/1]).
 -export([sumAngles/3]).
@@ -48,7 +49,7 @@ setf(R=#g03{},f,F) ->
 setf(R,z,_)->
 	R.
 
-% -record(handles,{x,y}).
+-record(handles,{x,y}).
 
 -define(RES,40). %steps per mm
 %-define(RES,10). %steps per mm
@@ -113,6 +114,7 @@ inner_svg_loop(Fd, [{X,Y} | T], Xacc, Yacc) ->
 
 steps_init() ->
 	register(steps, self()),
+	spawn_link(?MODULE, step_runner_init, []),
 	steps_init_2().
 
 steps_init_2() ->
@@ -128,7 +130,7 @@ steps_loop(Cmds) ->
 		reset ->
 			ok;
 		run ->
-			%step_runner(Cmds),
+			[ step_runner ! Cmd || Cmd <- Cmds],
 			steps_loop(Cmds)
 	end.
 
@@ -155,6 +157,61 @@ step_rec_loop(L,Cmd) ->
 			end %%return value
 	end.
 
+step_runner_init() ->
+	register(step_runner, self()),
+	X = [ gpio_init(P,out) || P <- [14, 15, 17, 18]],
+	Y = [ gpio_init(P,out) || P <- [25, 24, 23, 22]],
+	spawn_link(?MODULE, laser_init, []),
+	receive
+		laser_operational ->
+			ok
+	after 3000 ->
+			exit("failed to init laser")
+	end,
+	step_runner(#handles{x=X,y=Y}, []).
+
+step_runner(Handles,Feed) ->
+	laserOff(),
+	receive
+		{Cmd,Steps} ->
+			io:format("Now executing: ~p ~n",[Cmd]),
+			{Wait,NextF} = waitAndFeed(Cmd,Feed),
+			laserOn(mode(Cmd)),
+			step_runner(Handles,Steps,Wait,NextF);
+		done ->
+			ok
+	end.
+step_runner(Handles,[],_Wait,Feed) ->
+	step_runner(Handles,Feed);
+step_runner(Handles,[ H | T ],Wait,Feed) ->
+	NewHandles = stepAccordingly(Handles,H,Wait),
+	step_runner(NewHandles,T,Wait,Feed).
+
+waitAndFeed(#g00{},Feed) ->
+	{1,Feed};
+waitAndFeed(Cmd=#g01{},Feed) ->
+	case Cmd#g01.f of
+		undefined ->
+			{feedToWait(Feed),Feed};
+		NewF ->
+			{feedToWait(NewF),NewF}
+	end;
+waitAndFeed(Cmd=#g02{},Feed) ->
+	case Cmd#g02.f of
+		undefined ->
+			{feedToWait(Feed),Feed};
+		NewF ->
+			{feedToWait(NewF),NewF}
+	end;
+waitAndFeed(Cmd=#g03{},Feed) ->
+	case Cmd#g03.f of
+		undefined ->
+			{feedToWait(Feed),Feed};
+		NewF ->
+			{feedToWait(NewF),NewF}
+	end.
+
+
 isCircle(#g02{}) ->
 	true;
 isCircle(#g03{}) ->
@@ -178,6 +235,8 @@ optimizeCircle([ H | T ]) ->
 
 
 start() ->
+
+	%make a motor handler that keeps states from pwron and takes a list of lists of steps, and signals ??? with which is under way
 
 	spawn_link(?MODULE, steps_init, []).
 	%spawn_link(?MODULE, laser_init, []),
@@ -483,47 +542,47 @@ arc_to_steps(Steps,Angle,Pos,TargetPos,CenterPos,R,Sign) ->
 	arc_to_steps(Steps-1,Anext,{Xnow+Xstep,Ynow+Ystep},TargetPos,CenterPos,R,Sign).
 
 
-% stepAccordingly(Handles,A1,A2,W) ->
-% 	stepAccordingly(Handles,myabs(A1),dir(A1),myabs(A2),dir(A2),W).
+stepAccordingly(Handles,{A1,A2},W) ->
+	stepAccordingly(Handles,myabs(A1),dir(A1),myabs(A2),dir(A2),W).
 
-% stepAccordingly(Handles={handles,A1handles,A2handles},A1,A1dir,A2,A2dir,W) ->
-% 	A1state = case A1 of
-% 		0 ->
-% 			A1handles;
-% 		1 ->
-% 			[H11,H12,H13,H14] = shiftAccordingly(A1handles, A1dir),
-% 			gpio:write(H14,0),
-% 			gpio:write(H13,0),
-% 			gpio:write(H11,1),
-% 			gpio:write(H12,1),
-% 			[H11,H12,H13,H14]
-% 	end,
-% 	A2state = case A2 of
-% 		0 ->
-% 			A2handles;
-% 		1 ->
-% 			[H21,H22,H23,H24] = shiftAccordingly(A2handles,A2dir),
-% 			gpio:write(H24,0),
-% 			gpio:write(H23,0),
-% 			gpio:write(H21,1),
-% 			gpio:write(H22,1),
-% 			[H21,H22,H23,H24] 
-% 	end,
-% 	Wait = case A1+A2 of
-% 		2 ->
-% 			round(1.4*W);
-% 		1 ->
-% 			W;
-% 		0->
-% 			0
-% 	end,
-% 	wait_ms(Wait),
-% 	laser ! {check,Handles,self()},
-% 	receive
-% 		{ok} ->
-% 		 	ok
-% 	end,
-% 	{handles,A1state,A2state}.
+stepAccordingly(Handles={handles,A1handles,A2handles},A1,A1dir,A2,A2dir,W) ->
+	A1state = case A1 of
+		0 ->
+			A1handles;
+		1 ->
+			[H11,H12,H13,H14] = shiftAccordingly(A1handles, A1dir),
+			gpio:write(H14,0),
+			gpio:write(H13,0),
+			gpio:write(H11,1),
+			gpio:write(H12,1),
+			[H11,H12,H13,H14]
+	end,
+	A2state = case A2 of
+		0 ->
+			A2handles;
+		1 ->
+			[H21,H22,H23,H24] = shiftAccordingly(A2handles,A2dir),
+			gpio:write(H24,0),
+			gpio:write(H23,0),
+			gpio:write(H21,1),
+			gpio:write(H22,1),
+			[H21,H22,H23,H24] 
+	end,
+	Wait = case A1+A2 of
+		2 ->
+			round(1.4*W);
+		1 ->
+			W;
+		0->
+			0
+	end,
+	wait_ms(Wait),
+	laser ! {check,Handles,self()},
+	receive
+		{ok} ->
+		 	ok
+	end,
+	{handles,A1state,A2state}.
 
 -ifdef(debug).
 wait_ms(_W) ->
@@ -584,6 +643,8 @@ myabs(Var) ->
 			Var
 	end.
 
+feedToWait(F) ->
+	round(5/F*5).
 
 feedToWait(F,Mode) ->
 	case Mode of
@@ -746,6 +807,7 @@ laserOff() ->
 laser_init() ->
 	Pid = gpio_init(8,out),
 	register(laser,self()),
+	step_runner ! laser_operational,
 	spawn_link(?MODULE,second_timer,[]),
 	laser_loop(Pid).
 
