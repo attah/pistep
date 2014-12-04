@@ -171,6 +171,7 @@ step_runner_init() ->
 	step_runner(#handles{x=X,y=Y}, []).
 
 step_runner(Handles,Feed) ->
+grip here
 	laserOff(),
 	receive
 		{Cmd,Steps} ->
@@ -324,23 +325,24 @@ workerInit() ->
 
 	workerLoop({0,0}).
 
+%XXX: check rounding handling.. can we drift?
 workerLoop(Position) ->
 	receive
 		Data = {linear,X,Y,_F,_Mode} ->
 			io:format("linear, ~p~n",[Data] ),
 			%XXX use saved feed if undef!
-			{{Xs,Ys},NewP} = moveFromMode(Position,{X,Y},abs),
+			{{Xs,Ys},NewP} = moveFromMode(Position,{round(X),round(Y)},abs),
 			handle_linear(Xs,Ys),
 			workerLoop(NewP);
 		Data = {circular,X,Y,I,J,_F,Dir} ->
 			io:format("circle, ~p~n",[Data] ),
-			{{Xs,Ys},NewP} = moveFromMode(Position,{X,Y},abs),
+			{{Xs,Ys},NewP} = moveFromMode(Position,{round(X),round(Y)},abs),
 			%{{Is,Js},_} = moveFromMode(Position,{I,J},abs),
 			Is = I,
 			Js = J,
 			io:format("arcing from ~p to ~p by ~p with center ~p ~n",[Position,NewP,{Xs,Ys},{Is,Js}]),
 			%handle_circular(Handles,Xs,Ys,I,J,NewF,Dir,Position), FIXME
-			handle_circular(round(Xs),round(Ys),round(Is),round(Js),Dir),
+			handle_circular(Xs,Ys,round(Is),round(Js),Dir),
 			workerLoop(NewP);
 		done ->
 			steps ! done
@@ -499,9 +501,7 @@ handle_circular(Xt,Yt,I,J,Dir) ->
 	steps ! {endsegment}.
 
 
-arc_to_steps(0,_Angle,_Pos,_TargetPos,_CenterPos,_R,_Sign) ->
-	io:format("Proper circle completion ~n",[]),
-	ok;
+
 arc_to_steps(Steps,_Angle,Pos,Pos,_CenterPos,_R,_Sign)  when Steps =< 1 ->
 	io:format("Proper circle completion 2 ~n",[]),
 	ok;
