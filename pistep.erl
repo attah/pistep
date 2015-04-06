@@ -55,7 +55,7 @@ setf(R,z,_)->
 %-define(RES,10). %steps per mm
 
 % " style="fill:#ffffff; fill-opacity:0; stroke:#000000; stroke-width:1;"/> </g> </g> </svg>
--define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <?xml-stylesheet type=\"text/css\" href=\"style.css\"?> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"2000\" height=\"2500\"> <g transform=\"translate(0,2500)\"><g transform=\"scale(1,-1)\">").
+-define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <?xml-stylesheet type=\"text/css\" href=\"style.css\"?> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"5000\" height=\"2500\"> <g transform=\"translate(0,2500)\"><g transform=\"scale(1,-1)\">").
 -define(SvgEnd,"</g></g></svg>").
 -define(PathEnd,"\" > <title>~p</title> <animate class=\"blink\" begin=\"indefinite\" attributeName=\"visibility\" to=\"hidden\" dur=\"1s\" repeatCount=\"indefinite\"/></path>").
 
@@ -129,6 +129,8 @@ steps_loop(Cmds) ->
 			exit("ok");
 		reset ->
 			ok;
+		{jog,Cmd} ->
+			gs_in([Cmd]);
 		run ->
 			[ step_runner ! Cmd || Cmd <- Cmds],
 			steps_loop(Cmds)
@@ -151,7 +153,7 @@ step_rec_loop(L,Cmd) ->
 			DoneList = lists:reverse(L),
 			case isCircle(Cmd) of
 				true ->
-					optimizeCircle(DoneList);
+					lists:flatten(optimizeCircle(DoneList));
 				false ->
 					DoneList
 			end %%return value
@@ -171,12 +173,14 @@ step_runner_init() ->
 	step_runner(#handles{x=X,y=Y}, []).
 
 step_runner(Handles,Feed) ->
-grip here
+%XXX grip and ungrip in this function somewhere
 	laserOff(),
+	release(Handles),
 	receive
 		{Cmd,Steps} ->
 			io:format("Now executing: ~p ~n",[Cmd]),
 			{Wait,NextF} = waitAndFeed(Cmd,Feed),
+			grip(Handles),
 			laserOn(mode(Cmd)),
 			step_runner(Handles,Steps,Wait,NextF);
 		done ->
@@ -224,8 +228,8 @@ optimizeCircle([]) ->
 	[];
 optimizeCircle([{0,0} | [] ]) ->
 	[];
-optimizeCircle([{0,0} | [ Next | T ]]) ->
-	[ Next | optimizeCircle(T) ];
+optimizeCircle([{0,0} | T ]) ->
+	[ optimizeCircle(T) ];
 optimizeCircle([{1,0} | [ {0,1} | T ]]) ->
 	[ {1,1} | optimizeCircle(T) ];
 optimizeCircle([{0,1} | [ {1,0} | T ]]) ->
@@ -740,19 +744,21 @@ parseMCommand(Cmd) ->
 parseGCommand(Cmd) ->
 	% Perhaps ensure spaces to split on before cmd fields here...
 	case Cmd of
-		"G00" ++ _  ->
+		"G0 " ++ _  ->
 			%parseG00(string:substr(Cmd,4));
 			io:format("G00-command: ~p ~n", [Cmd]),
-			fancyGVars(string:substr(Cmd,4),record_info(fields,g00),#g00{});
-		"G01" ++ _  ->
+			fancyGVars(string:substr(Cmd,3),record_info(fields,g00),#g00{});
+		"G1 " ++ _  ->
 			io:format("G01-command: ~p ~n", [Cmd]),
-			fancyGVars(string:substr(Cmd,4),record_info(fields,g01),#g01{});
-		"G02" ++ _  ->
+			fancyGVars(string:substr(Cmd,3),record_info(fields,g01),#g01{});
+		"G2 " ++ _  ->
 			io:format("G02-command: ~p ~n", [Cmd]),
-			fancyGVars(string:substr(Cmd,4),record_info(fields,g02),#g02{});
-		"G03" ++ _  ->
+			fancyGVars(string:substr(Cmd,3),record_info(fields,g02),#g02{});
+		"G3 " ++ _  ->
 			io:format("G03-command: ~p ~n", [Cmd]),
-			fancyGVars(string:substr(Cmd,4),record_info(fields,g03),#g03{});
+			fancyGVars(string:substr(Cmd,3),record_info(fields,g03),#g03{});
+		"G20" ++ _  ->
+			error("Using retarded measuerement units");
 		_ ->
 			io:format("ERROR: unknown G-command: ~p ~n", [Cmd])
 	end.
@@ -763,10 +769,10 @@ fancyGVars(S,Fields,R)->
 fancyGVars2([],_Fields,Rec) ->
 	io:format("loldafuq ~p~n",[Rec]),
 	Rec;
-fancyGVars2([H|R],Fields,Rec) ->
-	case list_to_atom(string:to_lower(string:substr(H,1,1))) of 
+fancyGVars2([T|[C|R]],Fields,Rec) ->
+	case list_to_atom(string:to_lower(T)) of %string:substr(H,1,1))) of 
 		Type -> %when lists:member(Type,Fields) ->
-			fancyGVars2(R,Fields,setf(Rec,Type,l2f(string:substr(H,2))))%;
+			fancyGVars2(R,Fields,setf(Rec,Type,l2f(C)))%;
 		%_ ->
 		%	error(derp),
 		%	derp
