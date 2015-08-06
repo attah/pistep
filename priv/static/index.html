@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+<body>
+
+<script>
+function begin() 
+{
+    if ( typeof begin.counter == 'undefined' ) 
+    {
+        begin.counter = 0;
+    }
+    else
+    {
+      document.getElementById("canvas").getSVGDocument()
+        .getElementsByTagName("path")[begin.counter++]
+        .getElementsByTagName("animate")[0].endElement();
+    }
+      document.getElementById("canvas").getSVGDocument()
+        .getElementsByTagName("path")[begin.counter]
+        .getElementsByTagName("animate")[0].beginElement();
+}
+
+function onOpen(evt) {
+    console.log('connected');
+}
+
+function onClose(evt) {
+    console.log('close');
+}
+
+function onMessage(evt) {
+    if ( typeof onMessage.current != 'undefined' ) 
+    {
+      document.getElementById("canvas").getSVGDocument()
+        .getElementsByTagName("path")[onMessage.current]
+        .getElementsByTagName("animate")[0].endElement();
+    }
+
+    onMessage.current = evt.data;
+    console.log('message' + evt.data);
+    document.getElementById("canvas").getSVGDocument()
+      .getElementsByTagName("path")[evt.data]
+      .getElementsByTagName("animate")[0].beginElement();
+}
+
+function onError(evt) {
+    console.log('onerror');
+}
+
+
+var socket = new WebSocket('ws://localhost:8080/connect');
+//wsHost = $("#server").val()
+socket.onopen = function(evt) { onOpen(evt) }; 
+socket.onclose = function(evt) { onClose(evt) }; 
+socket.onmessage = function(evt) { onMessage(evt) }; 
+socket.onerror = function(evt) { onError(evt) }; 
+     
+
+
+
+
+</script>
+
+<object id="canvas" data="debug.svg" type="image/svg+xml">
+</object>
+
+</body>
+</html>

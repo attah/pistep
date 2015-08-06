@@ -57,9 +57,9 @@ setf(R,z,_)->
 % " style="fill:#ffffff; fill-opacity:0; stroke:#000000; stroke-width:1;"/> </g> </g> </svg>
 -define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <?xml-stylesheet type=\"text/css\" href=\"style.css\"?> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"5000\" height=\"2500\"> <g transform=\"translate(0,2500)\"><g transform=\"scale(1,-1)\">").
 -define(SvgEnd,"</g></g></svg>").
--define(PathEnd,"\" > <title>~p</title> <animate class=\"blink\" begin=\"indefinite\" attributeName=\"visibility\" to=\"hidden\" dur=\"1s\" repeatCount=\"indefinite\"/></path>").
+-define(PathEnd,"\" > <title>~p:~p</title> <animate class=\"blink\" begin=\"indefinite\" attributeName=\"visibility\" to=\"hidden\" dur=\"1s\" repeatCount=\"indefinite\"/></path>").
 
-
+-define(debug,1).
 % h4xx c(pistep,[{d,debug,1}]).
 -ifdef(debug).
 gpio_init(What,_Dir) ->
@@ -86,7 +86,7 @@ gpio_write(What,Value) ->
 %make more rubust when gripping
 
 do_svg(L) ->
-	case file:open("debug.svg", [write]) of
+	case file:open("lib/pistep-0.1.0/priv/debug.svg", [write]) of
 		{ok, Fd} ->
 			file:write(Fd, ?SvgHead),
 			svg_loop(Fd,L,0,0),
@@ -97,12 +97,12 @@ do_svg(L) ->
 	end.
 svg_loop(_Fd, [], _Xacc, _Yacc) ->
 	ok;
-svg_loop(Fd, [{Cmd , L} | T], Xacc, Yacc) ->
+svg_loop(Fd, [{Cmd, Count, L} | T], Xacc, Yacc) ->
 	%%%XXX: sanity-sum commands and instructions?
 	M = mode(Cmd),
 	file:write(Fd, io_lib:format("<path class=\"~p\" d=\"M~p, ~p ", [M,Xacc,Yacc])),
 	{Xp,Yp} = inner_svg_loop(Fd, L, 0, 0),
-	file:write(Fd, io_lib:format(?PathEnd,[Cmd])),
+	file:write(Fd, io_lib:format(?PathEnd,[Count,Cmd])),
 	svg_loop(Fd, T, Xacc+Xp, Yacc+Yp).  %% Adjust for absolute mode
 
 inner_svg_loop(_Fd, [], Xacc, Yacc) ->
@@ -118,7 +118,7 @@ steps_init() ->
 	steps_init_2().
 
 steps_init_2() ->
-	Cmds = lists:reverse(step_cmd_loop([])),
+	Cmds = lists:reverse(step_cmd_loop(1,[])),
 	do_svg(Cmds),
 	steps_loop(Cmds),
 	steps_init_2().
@@ -136,10 +136,10 @@ steps_loop(Cmds) ->
 			steps_loop(Cmds)
 	end.
 
-step_cmd_loop(L) ->
+step_cmd_loop(Count,L) ->
 	receive
 		{cmd,Cmd} ->
-			step_cmd_loop([{Cmd,step_rec_loop([],Cmd)} | L ]);
+			step_cmd_loop(Count+1,[{Cmd,Count,step_rec_loop([],Cmd)} | L ]);
 		done ->
 			io:format("~p ~n",[L]),
 			L
@@ -175,9 +175,14 @@ step_runner_init() ->
 step_runner(Handles,Feed) ->
 %XXX grip and ungrip in this function somewhere
 	laserOff(),
+        receive
+        after 5000 ->
+          ok
+        end,
 	release(Handles),
 	receive
-		{Cmd,Steps} ->
+		{Cmd,No,Steps} ->
+                        dispatcher ! {blink,No},
 			io:format("Now executing: ~p ~n",[Cmd]),
 			{Wait,NextF} = waitAndFeed(Cmd,Feed),
 			grip(Handles),
@@ -555,10 +560,10 @@ stepAccordingly(Handles={handles,A1handles,A2handles},A1,A1dir,A2,A2dir,W) ->
 			A1handles;
 		1 ->
 			[H11,H12,H13,H14] = shiftAccordingly(A1handles, A1dir),
-			gpio:write(H14,0),
-			gpio:write(H13,0),
-			gpio:write(H11,1),
-			gpio:write(H12,1),
+			gpio_write(H14,0),
+			gpio_write(H13,0),
+			gpio_write(H11,1),
+			gpio_write(H12,1),
 			[H11,H12,H13,H14]
 	end,
 	A2state = case A2 of
@@ -566,10 +571,10 @@ stepAccordingly(Handles={handles,A1handles,A2handles},A1,A1dir,A2,A2dir,W) ->
 			A2handles;
 		1 ->
 			[H21,H22,H23,H24] = shiftAccordingly(A2handles,A2dir),
-			gpio:write(H24,0),
-			gpio:write(H23,0),
-			gpio:write(H21,1),
-			gpio:write(H22,1),
+			gpio_write(H24,0),
+			gpio_write(H23,0),
+			gpio_write(H21,1),
+			gpio_write(H22,1),
 			[H21,H22,H23,H24] 
 	end,
 	Wait = case A1+A2 of
@@ -650,13 +655,13 @@ myabs(Var) ->
 feedToWait(F) ->
 	round(5/F*5).
 
-feedToWait(F,Mode) ->
-	case Mode of
-		move ->
-			1;
-		tool ->
-			round(5/F*5)
-	end.
+%feedToWait(F,Mode) ->
+%	case Mode of
+%		move ->
+%			1;
+%		tool ->
+%			round(5/F*5)
+%	end.
 
 dirToRadSign(Dir) ->
 	case Dir of
@@ -869,7 +874,7 @@ laser_loop(Pid,T,State) ->
 				laser_loop(Pid,T,off)
 			end;
 		{tick} ->
-			io:format("tick!"),
+			%io:format("tick!"),
 			case State of
 				on ->
 					laser_loop(Pid,T+1,State);
