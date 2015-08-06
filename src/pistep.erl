@@ -175,10 +175,10 @@ step_runner_init() ->
 step_runner(Handles,Feed) ->
 %XXX grip and ungrip in this function somewhere
 	laserOff(),
-        receive
-        after 5000 ->
-          ok
-        end,
+        %receive
+        %after 5000 ->
+        %  ok
+        %end,
 	release(Handles),
 	receive
 		{Cmd,No,Steps} ->
