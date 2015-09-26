@@ -59,7 +59,7 @@ setf(R,z,_)->
 -define(SvgEnd,"</g></g></svg>").
 -define(PathEnd,"\" > <title>~p:~p</title> <animate class=\"blink\" begin=\"indefinite\" attributeName=\"visibility\" to=\"hidden\" dur=\"1s\" repeatCount=\"indefinite\"/></path>").
 
--define(debug,1).
+%-define(debug,1).
 % h4xx c(pistep,[{d,debug,1}]).
 -ifdef(debug).
 gpio_init(What,_Dir) ->
