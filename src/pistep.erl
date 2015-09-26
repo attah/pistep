@@ -749,17 +749,17 @@ parseMCommand(Cmd) ->
 parseGCommand(Cmd) ->
 	% Perhaps ensure spaces to split on before cmd fields here...
 	case Cmd of
-		"G0 " ++ _  ->
+		"G00 " ++ _  ->
 			%parseG00(string:substr(Cmd,4));
 			io:format("G00-command: ~p ~n", [Cmd]),
 			fancyGVars(string:substr(Cmd,3),record_info(fields,g00),#g00{});
-		"G1 " ++ _  ->
+		"G01 " ++ _  ->
 			io:format("G01-command: ~p ~n", [Cmd]),
 			fancyGVars(string:substr(Cmd,3),record_info(fields,g01),#g01{});
-		"G2 " ++ _  ->
+		"G02 " ++ _  ->
 			io:format("G02-command: ~p ~n", [Cmd]),
 			fancyGVars(string:substr(Cmd,3),record_info(fields,g02),#g02{});
-		"G3 " ++ _  ->
+		"G03 " ++ _  ->
 			io:format("G03-command: ~p ~n", [Cmd]),
 			fancyGVars(string:substr(Cmd,3),record_info(fields,g03),#g03{});
 		"G20" ++ _  ->
