@@ -48,8 +48,19 @@ function onError(evt) {
 }
 
 
-var socket = new WebSocket('ws://localhost:8080/connect');
+//var socket = new WebSocket('ws://'+loc.host+':8080/connect');
 //wsHost = $("#server").val()
+//wsHost = $("#server").val()
+//socket = new WebSocket(wsHost);
+var loc = window.location, new_uri;
+if (loc.protocol === "https:") {
+    new_uri = "wss:";
+} else {
+    new_uri = "ws:";
+}
+new_uri += "//" + loc.host;
+new_uri += loc.pathname + "connect";
+socket = new WebSocket(new_uri);
 socket.onopen = function(evt) { onOpen(evt) }; 
 socket.onclose = function(evt) { onClose(evt) }; 
 socket.onmessage = function(evt) { onMessage(evt) }; 
