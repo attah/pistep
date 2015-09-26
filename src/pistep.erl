@@ -752,16 +752,16 @@ parseGCommand(Cmd) ->
 		"G00" ++ _  ->
 			%parseG00(string:substr(Cmd,4));
 			io:format("G00-command: ~p ~n", [Cmd]),
-			fancyGVars(string:substr(Cmd,3),record_info(fields,g00),#g00{});
+			fancyGVars(string:substr(Cmd,4),record_info(fields,g00),#g00{});
 		"G01" ++ _  ->
 			io:format("G01-command: ~p ~n", [Cmd]),
-			fancyGVars(string:substr(Cmd,3),record_info(fields,g01),#g01{});
+			fancyGVars(string:substr(Cmd,4),record_info(fields,g01),#g01{});
 		"G02" ++ _  ->
 			io:format("G02-command: ~p ~n", [Cmd]),
-			fancyGVars(string:substr(Cmd,3),record_info(fields,g02),#g02{});
+			fancyGVars(string:substr(Cmd,4),record_info(fields,g02),#g02{});
 		"G03" ++ _  ->
 			io:format("G03-command: ~p ~n", [Cmd]),
-			fancyGVars(string:substr(Cmd,3),record_info(fields,g03),#g03{});
+			fancyGVars(string:substr(Cmd,4),record_info(fields,g03),#g03{});
 		"G20" ++ _  ->
 			error("Using retarded measuerement units");
 		_ ->
