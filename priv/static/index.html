@@ -3,22 +3,7 @@
 <body>
 
 <script>
-function begin() 
-{
-    if ( typeof begin.counter == 'undefined' ) 
-    {
-        begin.counter = 0;
-    }
-    else
-    {
-      document.getElementById("canvas").getSVGDocument()
-        .getElementsByTagName("path")[begin.counter++]
-        .getElementsByTagName("animate")[0].endElement();
-    }
-      document.getElementById("canvas").getSVGDocument()
-        .getElementsByTagName("path")[begin.counter]
-        .getElementsByTagName("animate")[0].beginElement();
-}
+
 
 function onOpen(evt) {
     console.log('connected');
@@ -29,6 +14,8 @@ function onClose(evt) {
 }
 
 function onMessage(evt) {
+
+    index = evt.data - 1;
     if ( typeof onMessage.current != 'undefined' ) 
     {
       document.getElementById("canvas").getSVGDocument()
@@ -36,10 +23,11 @@ function onMessage(evt) {
         .getElementsByTagName("animate")[0].endElement();
     }
 
-    onMessage.current = evt.data;
+    onMessage.current = index;
+
     console.log('message' + evt.data);
     document.getElementById("canvas").getSVGDocument()
-      .getElementsByTagName("path")[evt.data]
+      .getElementsByTagName("path")[index]
       .getElementsByTagName("animate")[0].beginElement();
 }
 
