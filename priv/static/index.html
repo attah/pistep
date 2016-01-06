@@ -4,6 +4,34 @@
 
 <script>
 
+// FUGLY fix for Firefox not executing endElement in inactive tabs 
+var vis = (function(){
+    var stateKey, eventKey, keys = {
+        hidden: "visibilitychange",
+        webkitHidden: "webkitvisibilitychange",
+        mozHidden: "mozvisibilitychange",
+        msHidden: "msvisibilitychange"
+    };
+    for (stateKey in keys) {
+        if (stateKey in document) {
+            eventKey = keys[stateKey];
+            break;
+        }
+    }
+    return function(c) {
+        if (c) document.addEventListener(eventKey, c);
+        return !document[stateKey];
+    }
+})();
+
+vis(function(){
+  if(vis())
+  {
+    blink(blink.index);
+  }
+});
+
+// End FUGLYness
 
 function onOpen(evt) {
     console.log('connected');
@@ -14,20 +42,30 @@ function onClose(evt) {
 }
 
 function onMessage(evt) {
+    console.log('onmsg');
+    blink(evt.data-1);
+}
 
-    index = evt.data - 1;
-    if ( typeof onMessage.current != 'undefined' ) 
+function blink(idx) {
+    blink.index = idx;
+
+    if(!vis())
+    { //part of FUGLY
+      return;
+    }
+
+    if ( typeof blink.current != 'undefined' ) 
     {
       document.getElementById("canvas").getSVGDocument()
-        .getElementsByTagName("path")[onMessage.current]
+        .getElementsByTagName("path")[blink.current]
         .getElementsByTagName("animate")[0].endElement();
     }
 
-    onMessage.current = index;
+    console.log('message ' + blink.index + 'curr ' + blink.current);
+    blink.current = blink.index;
 
-    console.log('message' + evt.data);
     document.getElementById("canvas").getSVGDocument()
-      .getElementsByTagName("path")[index]
+      .getElementsByTagName("path")[blink.index]
       .getElementsByTagName("animate")[0].beginElement();
 }
 

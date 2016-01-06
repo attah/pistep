@@ -11,7 +11,7 @@
 }).
 
 init(_, _, _) ->
-        register(dispatcher,self()),
+        dispatcher ! {reg, self()},
 	{upgrade, protocol, cowboy_websocket}.
 
 websocket_init(_, Req, _Opts) ->

@@ -7,6 +7,7 @@
 -export([second_timer/0]).
 -export([readFile/1]).
 -export([sumAngles/3]).
+-export([dispatcher_init/0]).
 -record(g00,{x,y}).
 -record(g01,{x,y,f}).
 -record(g02,{x,y,i,j,f}).
@@ -59,7 +60,7 @@ setf(R,z,_)->
 -define(SvgEnd,"</g></g></svg>").
 -define(PathEnd,"\" > <title>~p:~p</title> <animate class=\"blink\" begin=\"indefinite\" attributeName=\"visibility\" to=\"hidden\" dur=\"1s\" repeatCount=\"indefinite\"/></path>").
 
-%-define(debug,1).
+% -define(debug,1).
 % h4xx c(pistep,[{d,debug,1}]).
 -ifdef(debug).
 gpio_init(What,_Dir) ->
@@ -72,8 +73,9 @@ gpio_init(What,Dir) ->
 
 
 -ifdef(debug).
-gpio_write(What,Value) ->
-	io:format("Wrote ~p to ~p~n",[Value,What] ).
+gpio_write(_What,_Value) ->
+	ok.
+	%io:format("Wrote ~p to ~p~n",[Value,What] ).
 -else.
 gpio_write(What,Value) ->
 	gpio:write(What,Value).
@@ -247,7 +249,7 @@ optimizeCircle([ H | T ]) ->
 start() ->
 
 	%make a motor handler that keeps states from pwron and takes a list of lists of steps, and signals ??? with which is under way
-
+	spawn_link(?MODULE, dispatcher_init, []),
 	spawn_link(?MODULE, steps_init, []).
 	%spawn_link(?MODULE, laser_init, []),
 	%Worker = spawn_link(?MODULE, workerInit, []),%[[14, 15, 17, 18],[25, 24, 23, 22]]),
@@ -595,7 +597,10 @@ stepAccordingly(Handles={handles,A1handles,A2handles},A1,A1dir,A2,A2dir,W) ->
 
 -ifdef(debug).
 wait_ms(_W) ->
-	ok.
+	receive
+		after 4 ->
+			ok
+	end.
 -else.
 wait_ms(W) ->
 	receive
@@ -908,7 +913,23 @@ second_timer() ->
 	second_timer().
 
 
+dispatcher_init() ->
+	register(dispatcher,self()),
+	dispatcher_main([]).
 
+dispatcher_main(Clients)->
+	receive
+		{reg, Pid} -> 
+			io:format("Regged ~p~n",[Pid]),
+			monitor(process,Pid),
+			dispatcher_main([Pid | Clients]);
+		{'DOWN',_Ref,process,Pid,_Kind} ->
+			io:format("Unregged ~p~n",[Pid]),
+			dispatcher_main(lists:delete(Pid,Clients));
+		{blink,No} ->
+			[ Pid ! {blink,No} || Pid <- Clients ],
+			dispatcher_main(Clients)
+	end.
 
 
 
