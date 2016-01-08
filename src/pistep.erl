@@ -8,6 +8,7 @@
 -export([readFile/1]).
 -export([sumAngles/3]).
 -export([dispatcher_init/0]).
+-export([svg_keeper_init/0]).
 -record(g00,{x,y}).
 -record(g01,{x,y,f}).
 -record(g02,{x,y,i,j,f}).
@@ -58,10 +59,12 @@ setf(R,z,_)->
 % " style="fill:#ffffff; fill-opacity:0; stroke:#000000; stroke-width:1;"/> </g> </g> </svg>
 -define(SvgHead,"<?xml version=\"1.0\" standalone=\"yes\" ?> <!DOCTYPE svg PUBLIC \"-//W3C//DTD SVG 1.0//EN\" \"http://www.w3.org/TR/2001/PR-SVG-20010719/DTD/svg10.dtd\"> <?xml-stylesheet type=\"text/css\" href=\"style.css\"?> <svg version=\"1.1\" baseProfile=\"full\" xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" xmlns:ev=\"http://www.w3.org/2001/xml-events\" width=\"5000\" height=\"2500\"> <g transform=\"translate(0,2500)\"><g transform=\"scale(1,-1)\">").
 -define(SvgEnd,"</g></g></svg>").
+-define(PathBegin,"<path class=\"~p\" d=\"M~p, ~p ").
 -define(PathEnd,"\" > <title>~p:~p</title> <animate class=\"blink\" begin=\"indefinite\" attributeName=\"visibility\" to=\"hidden\" dur=\"1s\" repeatCount=\"indefinite\"/></path>").
 
-% -define(debug,1).
+%-define(debug,1).
 % h4xx c(pistep,[{d,debug,1}]).
+% pistep:readFile("/home/attah/nemabracket_new.ngc").
 -ifdef(debug).
 gpio_init(What,_Dir) ->
 	What.
@@ -87,32 +90,38 @@ gpio_write(What,Value) ->
 
 %make more rubust when gripping
 
-do_svg(L) ->
-	case file:open("lib/pistep-0.1.0/priv/debug.svg", [write]) of
-		{ok, Fd} ->
-			file:write(Fd, ?SvgHead),
-			svg_loop(Fd,L,0,0),
-			file:write(Fd, ?SvgEnd),
-			file:close(Fd);
-		{error, Reason} ->
-			Reason
+svg_keeper_init() ->
+	register(svg_keeper, self()),
+	svg_keeper([]).
+svg_keeper(Svg) ->
+	receive
+		{get,Pid} ->
+			Pid ! {svg,Svg},
+			svg_keeper(Svg);
+		{put,New} ->
+			svg_keeper(New)
 	end.
-svg_loop(_Fd, [], _Xacc, _Yacc) ->
-	ok;
+
+do_svg(L) ->
+	io:format("~p~n",[calendar:local_time()]),
+	Fd = ?SvgHead ++ svg_loop([],L,0,0) ++ ?SvgEnd,
+	io:format("~p~n",[calendar:local_time()]),
+	svg_keeper ! {put,Fd}.
+	
+svg_loop(Fd, [], _Xacc, _Yacc) ->
+	Fd;
 svg_loop(Fd, [{Cmd, Count, L} | T], Xacc, Yacc) ->
 	%%%XXX: sanity-sum commands and instructions?
 	M = mode(Cmd),
-	file:write(Fd, io_lib:format("<path class=\"~p\" d=\"M~p, ~p ", [M,Xacc,Yacc])),
-	{Xp,Yp} = inner_svg_loop(Fd, L, 0, 0),
-	file:write(Fd, io_lib:format(?PathEnd,[Count,Cmd])),
-	svg_loop(Fd, T, Xacc+Xp, Yacc+Yp).  %% Adjust for absolute mode
+	Begin = io_lib:format(?PathBegin, [M,Xacc,Yacc]),
+	{Data,{Xp,Yp}} = inner_svg_loop([], L, 0, 0),
+	End = io_lib:format(?PathEnd,[Count,Cmd]),
+	svg_loop(Fd++Begin++Data++End, T, Xacc+Xp, Yacc+Yp).  %% Adjust for absolute mode
 
-inner_svg_loop(_Fd, [], Xacc, Yacc) ->
-	{Xacc,Yacc};
+inner_svg_loop(Fd, [], Xacc, Yacc) ->
+	{lists:flatten(lists:reverse(Fd)),{Xacc,Yacc}};
 inner_svg_loop(Fd, [{X,Y} | T], Xacc, Yacc) ->
-
-	file:write(Fd, io_lib:format(" l ~p ~p ",[X,Y])),
-	inner_svg_loop(Fd, T, Xacc+X, Yacc+Y).
+	inner_svg_loop([io_lib:format(" l ~p ~p ",[X,Y])]++Fd, T, Xacc+X, Yacc+Y).
 
 steps_init() ->
 	register(steps, self()),
@@ -249,6 +258,7 @@ optimizeCircle([ H | T ]) ->
 start() ->
 
 	%make a motor handler that keeps states from pwron and takes a list of lists of steps, and signals ??? with which is under way
+	spawn_link(?MODULE, svg_keeper_init, []),
 	spawn_link(?MODULE, dispatcher_init, []),
 	spawn_link(?MODULE, steps_init, []).
 	%spawn_link(?MODULE, laser_init, []),

@@ -7,7 +7,8 @@
 start(_Type, _Args) ->
         Dispatch = cowboy_router:compile([{'_', [
         {"/", cowboy_static, {priv_file, pistep, "static/index.html"}},
-        {"/debug.svg", cowboy_static, {priv_file, pistep, "debug.svg"}},
+        %{"/debug.svg", cowboy_static, {priv_file, pistep, "debug.svg"}},
+        {"/debug.svg",svg_handler,[]},
         {"/style.css", cowboy_static, {priv_file, pistep, "static/style.css"}},
         {"/connect", ws_handler, []} 
         ]}]),
